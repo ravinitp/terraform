@@ -1671,6 +1671,7 @@ var _ schemaAttribute = singleNestedAttribute{}
 
 type singleNestedAttribute struct {
 	Attributes objectSchema
+	Required   bool
 	validateObject
 }
 
@@ -1680,6 +1681,8 @@ func (a singleNestedAttribute) SchemaAttribute() *configschema.Attribute {
 			Nesting:    configschema.NestingSingle,
 			Attributes: a.Attributes.SchemaAttributes(),
 		},
+		Required: a.Required,
+		Optional: !a.Required,
 	}
 }
 
