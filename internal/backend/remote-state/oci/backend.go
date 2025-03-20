@@ -1,0 +1,138 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
+package oci
+
+import (
+	"github.com/hashicorp/terraform/internal/configs/configschema"
+	"github.com/hashicorp/terraform/internal/tfdiags"
+	"github.com/zclconf/go-cty/cty"
+)
+
+// New creates a new backend for OSS remote state.
+func New() *configschema.Block {
+	return &configschema.Block{
+		Attributes: map[string]*configschema.Attribute{
+			"bucket": {
+				Type:        cty.String,
+				Required:    true,
+				Description: "The name of the OCI Object Storage bucket.",
+			},
+			"namespace": {
+				Type:        cty.String,
+				Required:    true,
+				Description: "The namespace of the OCI Object Storage.",
+			},
+			"region": {
+				Type:        cty.String,
+				Optional:    true,
+				Description: "OCI region where the bucket is located.",
+			},
+			"compartment_id": {
+				Type:        cty.String,
+				Required:    true,
+				Description: "The OCID of the compartment containing the bucket.",
+			},
+			"tenancy_ocid": {
+				Type:        cty.String,
+				Optional:    true,
+				Description: "The OCID of the tenancy.",
+			},
+			"user_ocid": {
+				Type:        cty.String,
+				Optional:    true,
+				Description: "The OCID of the user.",
+			},
+			"fingerprint": {
+				Type:        cty.String,
+				Optional:    true,
+				Description: "The fingerprint of the user's API key.",
+			},
+			"private_key": {
+				Type:        cty.String,
+				Sensitive:   true,
+				Optional:    true,
+				Description: "The private key for API authentication.",
+			},
+			"private_key_path": {
+				Type:        cty.String,
+				Optional:    true,
+				Description: "Path to the private key file.",
+			},
+			"private_key_password": {
+				Type:        cty.String,
+				Sensitive:   true,
+				Optional:    true,
+				Description: "Passphrase for the private key, if required.",
+			},
+			"auth_type": {
+				Type:        cty.String,
+				Optional:    true,
+				Description: "Authentication method (API key, Instance Principal, Resource Principal, etc.).",
+			},
+
+			"config_file_profile": {
+				Type:        cty.String,
+				Optional:    true,
+				Description: "Profile name from the OCI config file.",
+			},
+		},
+	}
+}
+
+type Backend struct {
+	Bucket             string
+	Key                string
+	namespace          string
+	Region             string
+	TenancyOcid        string
+	UserOcid           string
+	Fingerprint        string
+	PrivateKey         string
+	PrivateKeyPath     string
+	PrivateKeyPassword string
+	AuthType           string
+	ConfigFileProfile  string
+}
+
+func (b *Backend) PrepareConfig(obj cty.Value) (cty.Value, tfdiags.Diagnostics) {
+	return obj, tfdiags.Diagnostics{}
+}
+func (b *Backend) Configure(obj cty.Value) tfdiags.Diagnostics {
+	var diags tfdiags.Diagnostics
+
+	if obj.IsNull() {
+		diags.Append(tfdiags.AttributeValue(tfdiags.Error, "Invalid Configuration", "Received null configuration for OCI backend.", cty.GetAttrPath(".")))
+		return diags
+	}
+
+	if bucketVal := obj.GetAttr("bucket"); bucketVal.IsKnown() && !bucketVal.IsNull() {
+		b.Bucket = bucketVal.AsString()
+	} else {
+		diags.Append(tfdiags.AttributeValue(tfdiags.Error, "Missing Required Attribute", "Bucket name cannot be null", cty.GetAttrPath("bucket")))
+	}
+	if namespaceVal := obj.GetAttr("namespace"); namespaceVal.IsKnown() && !namespaceVal.IsNull() {
+		b.namespace = namespaceVal.AsString()
+	} else {
+		diags.Append(tfdiags.AttributeValue(tfdiags.Error, "Missing Required Attribute", "Bucket name cannot be null", cty.GetAttrPath("namespace")))
+	}
+	if keyVal := obj.GetAttr("key"); keyVal.IsKnown() && !keyVal.IsNull() {
+		b.Key = keyVal.AsString()
+	} else {
+		diags.Append(tfdiags.AttributeValue(tfdiags.Error, "Missing Required Attribute", "The 'key' attribute must be specified.", cty.GetAttrPath("key")))
+	}
+
+	if regionVal := obj.GetAttr("region"); regionVal.IsKnown() && !regionVal.IsNull() {
+		b.Region = regionVal.AsString()
+	}
+
+	if tenancyOcidVal := obj.GetAttr("tenancy_ocid"); tenancyOcidVal.IsKnown() && !tenancyOcidVal.IsNull() {
+		b.TenancyOcid = tenancyOcidVal.AsString()
+	}
+
+	if userOcidVal := obj.GetAttr("user_ocid"); userOcidVal.IsKnown() && !userOcidVal.IsNull() {
+		b.UserOcid = userOcidVal.AsString()
+	}
+
+	return diags
+}
