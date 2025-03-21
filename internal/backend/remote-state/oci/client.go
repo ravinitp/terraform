@@ -33,7 +33,7 @@ type RemoteClient struct {
 	kmsKeyID                    string
 }
 
-func (c *RemoteClient) Get() (payload *remote.Payload, err error) {
+func (c *RemoteClient) Get() (*remote.Payload, error) {
 	ctx := context.TODO()
 
 	log.Info("Downloading remote state")

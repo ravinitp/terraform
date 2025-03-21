@@ -4,13 +4,21 @@
 package oci
 
 import (
+	"github.com/hashicorp/terraform/internal/backend"
 	"github.com/hashicorp/terraform/internal/configs/configschema"
 	"github.com/hashicorp/terraform/internal/tfdiags"
 	"github.com/zclconf/go-cty/cty"
+	"path"
 )
 
+var lockFileSuffix = ".lock"
+
+func New() backend.Backend {
+	return &Backend{}
+}
+
 // New creates a new backend for OSS remote state.
-func New() *configschema.Block {
+func (b *Backend) ConfigSchema() *configschema.Block {
 	return &configschema.Block{
 		Attributes: map[string]*configschema.Attribute{
 			"bucket": {
@@ -93,6 +101,7 @@ type Backend struct {
 	PrivateKeyPassword string
 	AuthType           string
 	ConfigFileProfile  string
+	workspaceKeyPrefix string
 }
 
 func (b *Backend) PrepareConfig(obj cty.Value) (cty.Value, tfdiags.Diagnostics) {
@@ -135,4 +144,18 @@ func (b *Backend) Configure(obj cty.Value) tfdiags.Diagnostics {
 	}
 
 	return diags
+}
+
+func (b *Backend) path(name string) string {
+	if name == backend.DefaultStateName {
+		return b.Key
+	}
+
+	return path.Join(b.workspaceKeyPrefix, name, b.Key)
+}
+
+// getLockFilePath returns the path to the lock file for the given Terraform state.
+// For `default.tfstate`, the lock file is stored at `default.tfstate.tflock`.
+func (b *Backend) getLockFilePath(name string) string {
+	return b.path(name) + lockFileSuffix
 }
