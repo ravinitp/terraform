@@ -11,8 +11,8 @@ import (
 	"github.com/hashicorp/terraform/internal/states/statemgr"
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/objectstorage"
-	"github.com/prometheus/common/log"
 	"io"
+	"log"
 	"time"
 )
 
@@ -36,7 +36,7 @@ type RemoteClient struct {
 func (c *RemoteClient) Get() (*remote.Payload, error) {
 	ctx := context.TODO()
 
-	log.Info("Downloading remote state")
+	log.Println("[INFO] Downloading remote state")
 
 	return c.getObject(ctx)
 }
@@ -123,14 +123,14 @@ func (c *RemoteClient) putObject(data []byte) error {
 		}
 	}
 
-	log.Info("Uploading remote state")
+	log.Println("[INFO] Uploading remote state")
 
 	putResponse, err := c.objectStorageClient.PutObject(ctx, putRequest)
 	if err != nil {
 		return fmt.Errorf("failed to upload object: %w", err)
 	}
 
-	log.Debugf("Uploaded statefile response: %+v", putResponse)
+	log.Printf("[DEBUG] Uploaded statefile response: %+v\n", putResponse)
 	return nil
 }
 func (c *RemoteClient) Delete() error {
@@ -145,7 +145,7 @@ func (c *RemoteClient) Delete() error {
 	if err != nil {
 		return err
 	}
-	log.Debugf("delete statefile response: %+v", deleteResponse)
+	log.Printf("[DEBUG] delete statefile response: %+v\n", deleteResponse)
 	return nil
 }
 
@@ -205,6 +205,6 @@ func (c *RemoteClient) Unlock(id string) error {
 	if err != nil {
 		return err
 	}
-	log.Debugf("Unlock response: %v\n", deleteResponse)
+	log.Printf("[DEBUG] Unlock response: %v\n", deleteResponse)
 	return nil
 }
