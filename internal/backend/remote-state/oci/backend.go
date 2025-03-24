@@ -21,6 +21,11 @@ func New() backend.Backend {
 func (b *Backend) ConfigSchema() *configschema.Block {
 	return &configschema.Block{
 		Attributes: map[string]*configschema.Attribute{
+			"key": {
+				Type:        cty.String,
+				Required:    true,
+				Description: "The name of the state file stored on the remote backend.",
+			},
 			"bucket": {
 				Type:        cty.String,
 				Required:    true,
@@ -89,18 +94,18 @@ func (b *Backend) ConfigSchema() *configschema.Block {
 }
 
 type Backend struct {
-	Bucket             string
-	Key                string
+	bucket             string
+	key                string
 	namespace          string
-	Region             string
-	TenancyOcid        string
-	UserOcid           string
-	Fingerprint        string
-	PrivateKey         string
-	PrivateKeyPath     string
-	PrivateKeyPassword string
-	AuthType           string
-	ConfigFileProfile  string
+	region             string
+	tenancyOcid        string
+	userOcid           string
+	fingerprint        string
+	privateKey         string
+	privateKeyPath     string
+	privateKeyPassword string
+	authType           string
+	configFileProfile  string
 	workspaceKeyPrefix string
 }
 
@@ -116,7 +121,7 @@ func (b *Backend) Configure(obj cty.Value) tfdiags.Diagnostics {
 	}
 
 	if bucketVal := obj.GetAttr("bucket"); bucketVal.IsKnown() && !bucketVal.IsNull() {
-		b.Bucket = bucketVal.AsString()
+		b.bucket = bucketVal.AsString()
 	} else {
 		diags.Append(tfdiags.AttributeValue(tfdiags.Error, "Missing Required Attribute", "Bucket name cannot be null", cty.GetAttrPath("bucket")))
 	}
@@ -126,21 +131,21 @@ func (b *Backend) Configure(obj cty.Value) tfdiags.Diagnostics {
 		diags.Append(tfdiags.AttributeValue(tfdiags.Error, "Missing Required Attribute", "Bucket name cannot be null", cty.GetAttrPath("namespace")))
 	}
 	if keyVal := obj.GetAttr("key"); keyVal.IsKnown() && !keyVal.IsNull() {
-		b.Key = keyVal.AsString()
+		b.key = keyVal.AsString()
 	} else {
 		diags.Append(tfdiags.AttributeValue(tfdiags.Error, "Missing Required Attribute", "The 'key' attribute must be specified.", cty.GetAttrPath("key")))
 	}
 
 	if regionVal := obj.GetAttr("region"); regionVal.IsKnown() && !regionVal.IsNull() {
-		b.Region = regionVal.AsString()
+		b.region = regionVal.AsString()
 	}
 
 	if tenancyOcidVal := obj.GetAttr("tenancy_ocid"); tenancyOcidVal.IsKnown() && !tenancyOcidVal.IsNull() {
-		b.TenancyOcid = tenancyOcidVal.AsString()
+		b.tenancyOcid = tenancyOcidVal.AsString()
 	}
 
 	if userOcidVal := obj.GetAttr("user_ocid"); userOcidVal.IsKnown() && !userOcidVal.IsNull() {
-		b.UserOcid = userOcidVal.AsString()
+		b.userOcid = userOcidVal.AsString()
 	}
 
 	return diags
@@ -148,10 +153,10 @@ func (b *Backend) Configure(obj cty.Value) tfdiags.Diagnostics {
 
 func (b *Backend) path(name string) string {
 	if name == backend.DefaultStateName {
-		return b.Key
+		return b.key
 	}
 
-	return path.Join(b.workspaceKeyPrefix, name, b.Key)
+	return path.Join(b.workspaceKeyPrefix, name, b.key)
 }
 
 // getLockFilePath returns the path to the lock file for the given Terraform state.

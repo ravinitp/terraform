@@ -36,7 +36,7 @@ func (b *Backend) remoteClient(name string) (*RemoteClient, error) {
 	}
 	return &RemoteClient{
 		objectStorageClient: &client,
-		bucketName:          b.Bucket,
+		bucketName:          b.bucket,
 		path:                b.path(name),
 		namespace:           b.namespace,
 		lockFilePath:        b.getLockFilePath(name),
