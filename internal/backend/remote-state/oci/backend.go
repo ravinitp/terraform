@@ -6,12 +6,16 @@ package oci
 import (
 	"github.com/hashicorp/terraform/internal/backend"
 	"github.com/hashicorp/terraform/internal/configs/configschema"
+	"github.com/hashicorp/terraform/internal/logging"
 	"github.com/hashicorp/terraform/internal/tfdiags"
 	"github.com/zclconf/go-cty/cty"
 	"path"
 )
 
-var lockFileSuffix = ".lock"
+var (
+	lockFileSuffix = ".lock"
+	logger         = logging.NewLogger("tf-backend-oci")
+)
 
 func New() backend.Backend {
 	return &Backend{}

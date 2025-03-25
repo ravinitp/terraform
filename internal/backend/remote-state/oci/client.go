@@ -13,7 +13,6 @@ import (
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/objectstorage"
 	"io"
-	"log"
 	"time"
 )
 
@@ -37,7 +36,7 @@ type RemoteClient struct {
 func (c *RemoteClient) Get() (*remote.Payload, error) {
 	ctx := context.TODO()
 
-	log.Println("[INFO] Downloading remote state")
+	logger.Debug("Downloading remote state")
 
 	return c.getObject(ctx)
 }
@@ -63,7 +62,7 @@ func (c *RemoteClient) getObject(ctx context.Context) (*remote.Payload, error) {
 	if err != nil {
 		var ociErr common.ServiceError
 		if errors.As(err, &ociErr) && ociErr.GetCode() == "ObjectNotFound" {
-			log.Printf("[INFO] State file '%s' not found. Initializing Terraform state...", c.path)
+			logger.Info(" State file '%s' not found. Initializing Terraform state...", c.path)
 			return nil, nil
 		} else {
 			return nil, fmt.Errorf("failed to access object '%s' in bucket '%s': %w", c.path, c.bucketName, err)
@@ -129,14 +128,14 @@ func (c *RemoteClient) putObject(data []byte) error {
 		}
 	}
 
-	log.Println("[INFO] Uploading remote state")
+	logger.Info("Uploading remote state")
 
 	putResponse, err := c.objectStorageClient.PutObject(ctx, putRequest)
 	if err != nil {
 		return fmt.Errorf("failed to upload object: %w", err)
 	}
 
-	log.Printf("[DEBUG] Uploaded statefile response: %+v\n", putResponse)
+	logger.Debug("Uploaded statefile response: %+v\n", putResponse)
 	return nil
 }
 func (c *RemoteClient) Delete() error {
@@ -151,7 +150,7 @@ func (c *RemoteClient) Delete() error {
 	if err != nil {
 		return err
 	}
-	log.Printf("[DEBUG] delete statefile response: %+v\n", deleteResponse)
+	logger.Debug("delete statefile response: %+v\n", deleteResponse)
 	return nil
 }
 
@@ -174,7 +173,7 @@ func (c *RemoteClient) Lock(info *statemgr.LockInfo) (string, error) {
 	if putErr != nil {
 		return "", putErr
 	}
-	fmt.Printf("Lock response: %v\n", putResponse)
+	logger.Debug("state lock response code: %+d\n", putResponse.String())
 	return info.ID, nil
 
 }
@@ -211,6 +210,6 @@ func (c *RemoteClient) Unlock(id string) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("[DEBUG] Unlock response: %v\n", deleteResponse)
+	logger.Debug("Unlock response: %v\n", deleteResponse.String())
 	return nil
 }
