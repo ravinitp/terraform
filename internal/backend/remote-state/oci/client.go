@@ -6,6 +6,7 @@ import (
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/hashicorp/terraform/internal/states/remote"
 	"github.com/hashicorp/terraform/internal/states/statemgr"
@@ -47,7 +48,6 @@ func (c *RemoteClient) getObject(ctx context.Context) (*remote.Payload, error) {
 		ObjectName:    common.String(c.path),
 		BucketName:    common.String(c.bucketName),
 	}
-
 	// Handle encryption settings
 	if c.serverSideEncryption && c.customerEncryptionKey != nil {
 		if len(c.customerEncryptionKeySHA256) > 0 {
@@ -61,7 +61,12 @@ func (c *RemoteClient) getObject(ctx context.Context) (*remote.Payload, error) {
 	// Get object from OCI
 	getResponse, err := c.objectStorageClient.GetObject(ctx, getRequest)
 	if err != nil {
-		return nil, fmt.Errorf("unable to access object %q in bucket %q: %w", c.path, c.bucketName, err)
+		var ociErr common.ServiceError
+		if errors.As(err, &ociErr) && ociErr.GetCode() == "ObjectNotFound" {
+			log.Printf("[INFO] State file '%s' not found. Initializing Terraform state...", c.path)
+		} else {
+			return nil, fmt.Errorf("failed to access object '%s' in bucket '%s': %w", c.path, c.bucketName, err)
+		}
 	}
 	defer getResponse.Content.Close() // ✅ Ensure response body is closed
 

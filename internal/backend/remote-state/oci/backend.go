@@ -41,11 +41,6 @@ func (b *Backend) ConfigSchema() *configschema.Block {
 				Optional:    true,
 				Description: "OCI region where the bucket is located.",
 			},
-			"compartment_id": {
-				Type:        cty.String,
-				Required:    true,
-				Description: "The OCID of the compartment containing the bucket.",
-			},
 			"tenancy_ocid": {
 				Type:        cty.String,
 				Optional:    true,
