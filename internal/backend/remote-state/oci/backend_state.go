@@ -31,6 +31,7 @@ func (b *Backend) remoteClient(name string) (*RemoteClient, error) {
 		return nil, errors.New("missing state name")
 	}
 	client, err := objectstorage.NewObjectStorageClientWithConfigurationProvider(common.DefaultConfigProvider())
+	common.SetSDKLogger(logger)
 	if err != nil {
 		return nil, err
 	}

@@ -62,7 +62,7 @@ func (c *RemoteClient) getObject(ctx context.Context) (*remote.Payload, error) {
 	if err != nil {
 		var ociErr common.ServiceError
 		if errors.As(err, &ociErr) && ociErr.GetCode() == "ObjectNotFound" {
-			logger.Info(" State file '%s' not found. Initializing Terraform state...", c.path)
+			logger.Debug(" State file '%s' not found. Initializing Terraform state...", c.path)
 			return nil, nil
 		} else {
 			return nil, fmt.Errorf("failed to access object '%s' in bucket '%s': %w", c.path, c.bucketName, err)
@@ -128,7 +128,7 @@ func (c *RemoteClient) putObject(data []byte) error {
 		}
 	}
 
-	logger.Info("Uploading remote state")
+	logger.Debug("Uploading remote state")
 
 	putResponse, err := c.objectStorageClient.PutObject(ctx, putRequest)
 	if err != nil {
