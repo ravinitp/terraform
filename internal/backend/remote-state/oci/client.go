@@ -64,6 +64,7 @@ func (c *RemoteClient) getObject(ctx context.Context) (*remote.Payload, error) {
 		var ociErr common.ServiceError
 		if errors.As(err, &ociErr) && ociErr.GetCode() == "ObjectNotFound" {
 			log.Printf("[INFO] State file '%s' not found. Initializing Terraform state...", c.path)
+			return nil, nil
 		} else {
 			return nil, fmt.Errorf("failed to access object '%s' in bucket '%s': %w", c.path, c.bucketName, err)
 		}
