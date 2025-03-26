@@ -104,6 +104,7 @@ type Backend struct {
 	authType           string
 	configFileProfile  string
 	workspaceKeyPrefix string
+	client             *RemoteClient
 }
 
 func (b *Backend) PrepareConfig(obj cty.Value) (cty.Value, tfdiags.Diagnostics) {
