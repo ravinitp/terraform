@@ -13,12 +13,6 @@ import (
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/objectstorage"
 	"io"
-	"time"
-)
-
-var (
-	consistencyRetryTimeout = 10 * time.Second
-	encryptionAlgorithm     = "AES256"
 )
 
 type RemoteClient struct {
@@ -27,9 +21,9 @@ type RemoteClient struct {
 	bucketName                  string
 	path                        string
 	lockFilePath                string
-	serverSideEncryption        bool
 	customerEncryptionKey       []byte
 	customerEncryptionKeySHA256 []byte
+	encryptionAlgorithm         string
 	kmsKeyID                    string
 }
 
@@ -42,18 +36,53 @@ func (c *RemoteClient) Get() (*remote.Payload, error) {
 }
 
 func (c *RemoteClient) getObject(ctx context.Context) (*remote.Payload, error) {
+	headRequest := objectstorage.HeadObjectRequest{
+		NamespaceName: common.String(c.namespace),
+		ObjectName:    common.String(c.path),
+		BucketName:    common.String(c.bucketName),
+		RequestMetadata: common.RequestMetadata{
+			RetryPolicy: getDefaultRetryPolicy(),
+		},
+	}
+	// Handle encryption settings
+	if c.customerEncryptionKey != nil {
+		if len(c.customerEncryptionKey) > 0 && len(c.customerEncryptionKeySHA256) > 0 {
+			headRequest.OpcSseCustomerKey = common.String(base64.StdEncoding.EncodeToString(c.customerEncryptionKey))
+			headRequest.OpcSseCustomerKeySha256 = common.String(base64.StdEncoding.EncodeToString(c.customerEncryptionKeySHA256))
+		}
+		if len(c.encryptionAlgorithm) > 0 {
+			headRequest.OpcSseCustomerAlgorithm = common.String(c.encryptionAlgorithm)
+		}
+	}
+	// Get object from OCI
+	headResponse, headErr := c.objectStorageClient.HeadObject(ctx, headRequest)
+	if headErr != nil {
+		var ociHeadErr common.ServiceError
+		if errors.As(headErr, &ociHeadErr) && ociHeadErr.GetHTTPStatusCode() == 404 {
+			logger.Debug(" State file '%s' not found. Initializing Terraform state...", c.path)
+			return nil, nil
+		} else {
+			return nil, fmt.Errorf("failed to access object '%s' in bucket '%s': %w", c.path, c.bucketName, headErr)
+		}
+	}
 	getRequest := objectstorage.GetObjectRequest{
 		NamespaceName: common.String(c.namespace),
 		ObjectName:    common.String(c.path),
 		BucketName:    common.String(c.bucketName),
+		IfMatch:       headResponse.ETag,
+		RequestMetadata: common.RequestMetadata{
+			RetryPolicy: getDefaultRetryPolicy(),
+		},
 	}
+
 	// Handle encryption settings
-	if c.serverSideEncryption && c.customerEncryptionKey != nil {
-		if len(c.customerEncryptionKeySHA256) > 0 {
-			getRequest.OpcSseCustomerKeySha256 = common.String(base64.StdEncoding.EncodeToString(c.customerEncryptionKeySHA256))
-		} else {
+	if c.customerEncryptionKey != nil {
+		if len(c.customerEncryptionKey) > 0 && len(c.customerEncryptionKeySHA256) > 0 {
 			getRequest.OpcSseCustomerKey = common.String(base64.StdEncoding.EncodeToString(c.customerEncryptionKey))
-			getRequest.OpcSseCustomerAlgorithm = common.String(encryptionAlgorithm)
+			getRequest.OpcSseCustomerKeySha256 = common.String(base64.StdEncoding.EncodeToString(c.customerEncryptionKeySHA256))
+		}
+		if len(c.encryptionAlgorithm) > 0 {
+			getRequest.OpcSseCustomerAlgorithm = common.String(c.encryptionAlgorithm)
 		}
 	}
 
@@ -61,12 +90,11 @@ func (c *RemoteClient) getObject(ctx context.Context) (*remote.Payload, error) {
 	getResponse, err := c.objectStorageClient.GetObject(ctx, getRequest)
 	if err != nil {
 		var ociErr common.ServiceError
-		if errors.As(err, &ociErr) && ociErr.GetCode() == "ObjectNotFound" {
-			logger.Debug(" State file '%s' not found. Initializing Terraform state...", c.path)
-			return nil, nil
-		} else {
-			return nil, fmt.Errorf("failed to access object '%s' in bucket '%s': %w", c.path, c.bucketName, err)
+		if errors.As(err, &ociErr) {
+			return nil, fmt.Errorf("failed to access object HttpStatusCode: %d\nOpcRequestId: %s\n message: %s\n ErrorCode: %s", ociErr.GetHTTPStatusCode(), ociErr.GetOpcRequestID(), ociErr.GetMessage(), ociErr.GetCode())
+
 		}
+		return nil, fmt.Errorf("failed to access object '%s' in bucket '%s': %w", c.path, c.bucketName, err)
 	}
 	defer getResponse.Content.Close() // ✅ Ensure response body is closed
 
