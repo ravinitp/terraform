@@ -86,6 +86,11 @@ func (b *Backend) ConfigSchema() *configschema.Block {
 				Optional:    true,
 				Description: "Profile name from the OCI config file.",
 			},
+			"workspace_key_prefix": {
+				Type:        cty.String,
+				Optional:    true,
+				Description: "The prefix applied to the non-default state path inside the bucket.",
+			},
 		},
 	}
 }
@@ -144,6 +149,12 @@ func (b *Backend) Configure(obj cty.Value) tfdiags.Diagnostics {
 
 	if userOcidVal := obj.GetAttr("user_ocid"); userOcidVal.IsKnown() && !userOcidVal.IsNull() {
 		b.userOcid = userOcidVal.AsString()
+	}
+
+	if workspaceKeyPrefixVal := obj.GetAttr("workspace_key_prefix"); workspaceKeyPrefixVal.IsKnown() && !workspaceKeyPrefixVal.IsNull() {
+		b.workspaceKeyPrefix = workspaceKeyPrefixVal.AsString()
+	} else {
+		b.workspaceKeyPrefix = defaultEnvPrefix
 	}
 
 	return diags
