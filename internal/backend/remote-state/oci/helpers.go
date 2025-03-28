@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/hashicorp/terraform/internal/backend/backendbase"
 	"io"
-	"os"
 	"sync"
 
 	"github.com/oracle/oci-go-sdk/v65/common"
@@ -22,8 +22,7 @@ type MultipartUploadData struct {
 	BucketName          *string
 	ObjectName          *string
 	ObjectStorageClient *oci_object_storage.ObjectStorageClient
-	SourcePath          *string
-	SourceInfo          *os.FileInfo
+	Data                []byte
 	StorageTier         oci_object_storage.StorageTierEnum
 	Metadata            map[string]string
 	RequestMetadata     common.RequestMetadata
@@ -49,25 +48,20 @@ type objectStorageSourceBlock struct {
 	blockNumber *int
 }
 
-func MultiPartUpload(multipartUploadData MultipartUploadData) (string, error) {
-	sourceInfo := *multipartUploadData.SourceInfo
-	if sourceInfo.Size() > DefaultFilePartSize {
+func multiPartUpload(multipartUploadData MultipartUploadData) (string, error) {
+	dataSize := int64(len(multipartUploadData.Data))
+	if dataSize > DefaultFilePartSize {
 		return multiPartUploadImpl(multipartUploadData)
 	}
-	return "", fmt.Errorf("file size too small for multipart upload")
+	// return "", fmt.Errorf("data size too small for multipart upload")
 }
 
 func multiPartUploadImpl(multipartUploadData MultipartUploadData) (string, error) {
 	client := multipartUploadData.ObjectStorageClient
-	file, err := os.Open(*multipartUploadData.SourcePath)
-	if err != nil {
-		return "", fmt.Errorf("error opening source file: %s", err)
-	}
-	defer file.Close()
 
-	sourceBlocks, err := objectMultiPartSplit(file)
+	sourceBlocks, err := objectMultiPartSplit(multipartUploadData.Data)
 	if err != nil {
-		return "", fmt.Errorf("error splitting source file: %s", err)
+		return "", fmt.Errorf("error splitting source data: %s", err)
 	}
 
 	multipartUploadRequest := &oci_object_storage.CreateMultipartUploadRequest{
@@ -93,27 +87,34 @@ func multiPartUploadImpl(multipartUploadData MultipartUploadData) (string, error
 	wg := &sync.WaitGroup{}
 	wg.Add(len(sourceBlocks))
 
+	// Push all source blocks into the channel
 	for _, sourceBlock := range sourceBlocks {
 		sourceBlocksChan <- sourceBlock
 	}
 	close(sourceBlocksChan)
 
+	// Start workers
 	for i := 0; i < workerCount; i++ {
-		go uploadPartsWorker(objectStorageMultiPartUploadContext{
-			client:                  *client,
-			wg:                      wg,
-			multipartUploadResponse: multipartUploadResponse,
-			multipartUploadRequest:  *multipartUploadRequest,
-			sourceBlocks:            sourceBlocksChan,
-			osUploadPartResponses:   osUploadPartResponses,
-		})
+		go func() {
+			err := uploadPartsWorker(objectStorageMultiPartUploadContext{
+				client:                  *client,
+				wg:                      wg,
+				multipartUploadResponse: multipartUploadResponse,
+				multipartUploadRequest:  *multipartUploadRequest,
+				sourceBlocks:            sourceBlocksChan,
+				osUploadPartResponses:   osUploadPartResponses,
+			})
+			if err != nil {
+				backendbase.ErrorAsDiagnostics(err)
+			}
+		}()
 	}
 
 	wg.Wait()
 	close(osUploadPartResponses)
 
 	commitMultipartUploadPartDetails := make([]oci_object_storage.CommitMultipartUploadPartDetails, len(sourceBlocks))
-	i := 0 // Initialize index variable
+	i := 0
 	for response := range osUploadPartResponses {
 		if response.error != nil {
 			return "", fmt.Errorf("failed to upload part: %s", response.error)
@@ -122,7 +123,7 @@ func multiPartUploadImpl(multipartUploadData MultipartUploadData) (string, error
 			PartNum: response.partNumber,
 			Etag:    response.response.ETag,
 		}
-		i++ //Increment Index
+		i++
 	}
 
 	commitMultipartUploadRequest := oci_object_storage.CommitMultipartUploadRequest{
@@ -141,17 +142,19 @@ func multiPartUploadImpl(multipartUploadData MultipartUploadData) (string, error
 
 	return "Upload successful", nil
 }
+func objectMultiPartSplit(data []byte) ([]objectStorageSourceBlock, error) {
+	dataSize := int64(len(data))
+	offsets, limits, _ := SplitSizeToOffsetsAndLimits(dataSize)
 
-func objectMultiPartSplit(file *os.File) ([]objectStorageSourceBlock, error) {
-	info, err := os.Stat(file.Name())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get file info: %s", err)
-	}
-	offsets, limits, _ := SplitSizeToOffsetsAndLimits(info.Size())
 	sourceBlocks := make([]objectStorageSourceBlock, len(offsets))
 	for i := range offsets {
+		start := offsets[i]
+		end := start + limits[i]
+		if end > dataSize {
+			end = dataSize
+		}
 		sourceBlocks[i] = objectStorageSourceBlock{
-			section:     io.NewSectionReader(file, offsets[i], limits[i]),
+			section:     io.NewSectionReader(bytes.NewReader(data), start, end-start),
 			blockNumber: &i,
 		}
 	}
@@ -172,10 +175,13 @@ func SplitSizeToOffsetsAndLimits(size int64) ([]int64, []int64, error) {
 	return offsets, limits, nil
 }
 
-func uploadPartsWorker(ctx objectStorageMultiPartUploadContext) {
+func uploadPartsWorker(ctx objectStorageMultiPartUploadContext) error {
 	for block := range ctx.sourceBlocks {
 		buffer := make([]byte, block.section.Size())
-		block.section.Read(buffer)
+		_, err := block.section.Read(buffer)
+		if err != nil {
+			return fmt.Errorf("error reading source block %d: %w", block.blockNumber, err)
+		}
 		tmpLength := int64(len(buffer))
 
 		uploadPartRequest := &oci_object_storage.UploadPartRequest{
@@ -186,11 +192,19 @@ func uploadPartsWorker(ctx objectStorageMultiPartUploadContext) {
 			ContentLength:  &tmpLength,
 			UploadPartBody: io.NopCloser(bytes.NewReader(buffer)),
 			UploadPartNum:  block.blockNumber,
+			RequestMetadata: common.RequestMetadata{
+				RetryPolicy: getDefaultRetryPolicy(),
+			},
 		}
 
-		ctx.client.UploadPart(context.Background(), *uploadPartRequest)
+		_, err := ctx.client.UploadPart(context.Background(), *uploadPartRequest)
 		ctx.wg.Done()
+		if err != nil {
+			logger.Error("Failed to upload part #%d: %s", block.blockNumber, err)
+			return err
+		}
 	}
+	return nil
 }
 
 func DeleteAllObjectVersions(client *oci_object_storage.ObjectStorageClient, bucket string, namespace string, prefix string) error {
