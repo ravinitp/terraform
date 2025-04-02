@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/hashicorp/terraform/internal/states/remote"
 	"github.com/hashicorp/terraform/internal/states/statemgr"
+	"github.com/hashicorp/terraform/internal/tfdiags"
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/objectstorage"
 	"io"
@@ -123,7 +124,20 @@ func (c *RemoteClient) getObject(ctx context.Context) (*remote.Payload, error) {
 }
 
 func (c *RemoteClient) Put(data []byte) error {
-	return c.putObject(data)
+	dataSize := int64(len(data))
+	if dataSize > DefaultFilePartSize {
+		logger.Info("Using Multipart Feature")
+		var multipartUploadData = MultipartUploadData{
+			client: c,
+			Data:   data,
+			RequestMetadata: common.RequestMetadata{
+				RetryPolicy: getDefaultRetryPolicy(),
+			},
+		}
+		return multipartUploadData.multiPartUploadImpl()
+	} else {
+		return c.putObject(data)
+	}
 }
 
 func (c *RemoteClient) putObject(data []byte) error {
@@ -147,12 +161,13 @@ func (c *RemoteClient) putObject(data []byte) error {
 	// Handle encryption settings
 	if c.kmsKeyID != "" {
 		putRequest.OpcSseKmsKeyId = common.String(c.kmsKeyID)
-	} else if c.serverSideEncryption && c.customerEncryptionKey != nil {
-		if len(c.customerEncryptionKeySHA256) > 0 {
-			putRequest.OpcSseCustomerKeySha256 = common.String(base64.StdEncoding.EncodeToString(c.customerEncryptionKeySHA256))
-		} else {
+	} else if c.customerEncryptionKey != nil {
+		if len(c.customerEncryptionKey) > 0 && len(c.customerEncryptionKeySHA256) > 0 {
 			putRequest.OpcSseCustomerKey = common.String(base64.StdEncoding.EncodeToString(c.customerEncryptionKey))
-			putRequest.OpcSseCustomerAlgorithm = common.String(encryptionAlgorithm)
+			putRequest.OpcSseCustomerKeySha256 = common.String(base64.StdEncoding.EncodeToString(c.customerEncryptionKeySHA256))
+		}
+		if len(c.encryptionAlgorithm) > 0 {
+			putRequest.OpcSseCustomerAlgorithm = common.String(c.encryptionAlgorithm)
 		}
 	}
 
@@ -167,18 +182,56 @@ func (c *RemoteClient) putObject(data []byte) error {
 	return nil
 }
 func (c *RemoteClient) Delete() error {
-	ctx := context.TODO()
 
-	deleteRequest := objectstorage.DeleteObjectRequest{
-		NamespaceName: common.String(c.namespace),
-		ObjectName:    common.String(c.path),
+	return c.DeleteAllObjectVersions()
+}
+func (c *RemoteClient) DeleteAllObjectVersions() error {
+	request := objectstorage.ListObjectVersionsRequest{
 		BucketName:    common.String(c.bucketName),
+		NamespaceName: common.String(c.namespace),
+		Prefix:        common.String(c.path),
 	}
-	deleteResponse, err := c.objectStorageClient.DeleteObject(ctx, deleteRequest)
+
+	response, err := c.objectStorageClient.ListObjectVersions(context.Background(), request)
 	if err != nil {
 		return err
 	}
-	logger.Debug("delete statefile response: %+v\n", deleteResponse)
+
+	request.Page = response.OpcNextPage
+
+	for request.Page != nil {
+		request.RequestMetadata.RetryPolicy = getDefaultRetryPolicy()
+
+		listResponse, err := c.objectStorageClient.ListObjectVersions(context.Background(), request)
+		if err != nil {
+			return err
+		}
+		response.Items = append(response.Items, listResponse.Items...)
+		request.Page = listResponse.OpcNextPage
+	}
+
+	var diagErr tfdiags.Diagnostics
+
+	for _, objectVersion := range response.Items {
+
+		deleteObjectVersionRequest := objectstorage.DeleteObjectRequest{
+			BucketName:    common.String(c.bucketName),
+			NamespaceName: common.String(c.namespace),
+			ObjectName:    objectVersion.Name,
+			VersionId:     objectVersion.VersionId,
+		}
+
+		deleteObjectVersionRequest.RequestMetadata.RetryPolicy = getDefaultRetryPolicy()
+
+		_, err := c.objectStorageClient.DeleteObject(context.Background(), deleteObjectVersionRequest)
+		if err != nil {
+			diagErr = diagErr.Append(err)
+		}
+	}
+	if diagErr != nil {
+		return diagErr.Err()
+	}
+
 	return nil
 }
 

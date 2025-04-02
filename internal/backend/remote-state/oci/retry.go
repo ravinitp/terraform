@@ -41,7 +41,7 @@ func shouldRetry(response common.OCIOperationResponse, startTime time.Time) bool
 	if RetryableStatus[statusCode] {
 		return true
 	}
-	return isNetworkError(response.Error)
+	return response.Error != nil && isNetworkError(response.Error)
 }
 
 func getRetryBackoffDuration(response common.OCIOperationResponse, startTime time.Time) time.Duration {

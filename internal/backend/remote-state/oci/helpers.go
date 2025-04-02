@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/hashicorp/terraform/internal/backend/backendbase"
 	"io"
 	"sync"
 
@@ -12,20 +11,15 @@ import (
 	oci_object_storage "github.com/oracle/oci-go-sdk/v65/objectstorage"
 )
 
-const DefaultFilePartSize int64 = 128 * 1024 * 1024 // 128MB
+const DefaultFilePartSize int64 = 64 * 1024 // 128 * 1024 * 1024 // 128MB
 const defaultNumberOfGoroutines = 10
 const MaxPartSize int64 = 50 * 1024 * 1024 * 1024
 const MaxCount int64 = 10000
 
 type MultipartUploadData struct {
-	NamespaceName       *string
-	BucketName          *string
-	ObjectName          *string
-	ObjectStorageClient *oci_object_storage.ObjectStorageClient
-	Data                []byte
-	StorageTier         oci_object_storage.StorageTierEnum
-	Metadata            map[string]string
-	RequestMetadata     common.RequestMetadata
+	client          *RemoteClient
+	Data            []byte
+	RequestMetadata common.RequestMetadata
 }
 
 type objectStorageUploadPartResponse struct {
@@ -35,10 +29,11 @@ type objectStorageUploadPartResponse struct {
 }
 
 type objectStorageMultiPartUploadContext struct {
-	client                  oci_object_storage.ObjectStorageClient
+	client                  *oci_object_storage.ObjectStorageClient
 	sourceBlocks            chan objectStorageSourceBlock
 	osUploadPartResponses   chan objectStorageUploadPartResponse
 	wg                      *sync.WaitGroup
+	errChan                 chan error
 	multipartUploadResponse oci_object_storage.CreateMultipartUploadResponse
 	multipartUploadRequest  oci_object_storage.CreateMultipartUploadRequest
 }
@@ -48,36 +43,25 @@ type objectStorageSourceBlock struct {
 	blockNumber *int
 }
 
-func multiPartUpload(multipartUploadData MultipartUploadData) (string, error) {
-	dataSize := int64(len(multipartUploadData.Data))
-	if dataSize > DefaultFilePartSize {
-		return multiPartUploadImpl(multipartUploadData)
-	}
-	// return "", fmt.Errorf("data size too small for multipart upload")
-}
+func (multipartUploadData MultipartUploadData) multiPartUploadImpl() error {
 
-func multiPartUploadImpl(multipartUploadData MultipartUploadData) (string, error) {
-	client := multipartUploadData.ObjectStorageClient
-
-	sourceBlocks, err := objectMultiPartSplit(multipartUploadData.Data)
+	sourceBlocks, err := multipartUploadData.objectMultiPartSplit()
 	if err != nil {
-		return "", fmt.Errorf("error splitting source data: %s", err)
+		return fmt.Errorf("error splitting source data: %s", err)
 	}
 
 	multipartUploadRequest := &oci_object_storage.CreateMultipartUploadRequest{
-		NamespaceName:   multipartUploadData.NamespaceName,
-		BucketName:      multipartUploadData.BucketName,
+		NamespaceName:   common.String(multipartUploadData.client.namespace),
+		BucketName:      common.String(multipartUploadData.client.bucketName),
 		RequestMetadata: multipartUploadData.RequestMetadata,
 		CreateMultipartUploadDetails: oci_object_storage.CreateMultipartUploadDetails{
-			Object:      multipartUploadData.ObjectName,
-			StorageTier: multipartUploadData.StorageTier,
-			Metadata:    multipartUploadData.Metadata,
+			Object: common.String(multipartUploadData.client.path),
 		},
 	}
 
-	multipartUploadResponse, err := client.CreateMultipartUpload(context.Background(), *multipartUploadRequest)
+	multipartUploadResponse, err := multipartUploadData.client.objectStorageClient.CreateMultipartUpload(context.Background(), *multipartUploadRequest)
 	if err != nil {
-		return "", fmt.Errorf("error creating multipart upload: %s", err)
+		return fmt.Errorf("error creating multipart upload: %s", err)
 	}
 
 	workerCount := defaultNumberOfGoroutines
@@ -92,38 +76,59 @@ func multiPartUploadImpl(multipartUploadData MultipartUploadData) (string, error
 		sourceBlocksChan <- sourceBlock
 	}
 	close(sourceBlocksChan)
-
+	errChan := make(chan error, workerCount)
 	// Start workers
 	for i := 0; i < workerCount; i++ {
 		go func() {
-			err := uploadPartsWorker(objectStorageMultiPartUploadContext{
-				client:                  *client,
+			ctx := &objectStorageMultiPartUploadContext{
+				client:                  multipartUploadData.client.objectStorageClient,
 				wg:                      wg,
+				errChan:                 errChan,
 				multipartUploadResponse: multipartUploadResponse,
 				multipartUploadRequest:  *multipartUploadRequest,
 				sourceBlocks:            sourceBlocksChan,
 				osUploadPartResponses:   osUploadPartResponses,
-			})
-			if err != nil {
-				backendbase.ErrorAsDiagnostics(err)
 			}
+			ctx.uploadPartsWorker()
 		}()
 	}
 
 	wg.Wait()
 	close(osUploadPartResponses)
+	close(errChan)
 
+	// Collect errors from workers
+	for workerErr := range errChan {
+		if workerErr != nil {
+			return workerErr
+		}
+	}
 	commitMultipartUploadPartDetails := make([]oci_object_storage.CommitMultipartUploadPartDetails, len(sourceBlocks))
 	i := 0
 	for response := range osUploadPartResponses {
-		if response.error != nil {
-			return "", fmt.Errorf("failed to upload part: %s", response.error)
+		if response.error != nil || response.partNumber == nil || response.response.ETag == nil {
+			return fmt.Errorf("failed to upload part: %s", response.error)
 		}
+		partNumber, etag := *response.partNumber, *response.response.ETag
 		commitMultipartUploadPartDetails[i] = oci_object_storage.CommitMultipartUploadPartDetails{
-			PartNum: response.partNumber,
-			Etag:    response.response.ETag,
+			PartNum: common.Int(partNumber),
+			Etag:    common.String(etag),
 		}
 		i++
+	}
+
+	if len(commitMultipartUploadPartDetails) != len(sourceBlocks) {
+		abortReq := oci_object_storage.AbortMultipartUploadRequest{
+			UploadId:      multipartUploadResponse.MultipartUpload.UploadId,
+			NamespaceName: multipartUploadResponse.Namespace,
+			BucketName:    multipartUploadResponse.Bucket,
+			ObjectName:    multipartUploadResponse.Object,
+		}
+		_, abortErr := multipartUploadData.client.objectStorageClient.AbortMultipartUpload(context.Background(), abortReq)
+		if abortErr != nil {
+			logger.Error(fmt.Sprintf("Failed to abort multipart upload: %s", abortErr))
+		}
+		return fmt.Errorf("not all parts uploaded successfully, multipart upload aborted")
 	}
 
 	commitMultipartUploadRequest := oci_object_storage.CommitMultipartUploadRequest{
@@ -133,17 +138,19 @@ func multiPartUploadImpl(multipartUploadData MultipartUploadData) (string, error
 		ObjectName:         multipartUploadResponse.Object,
 		OpcClientRequestId: multipartUploadResponse.OpcClientRequestId,
 		RequestMetadata:    multipartUploadRequest.RequestMetadata,
+		CommitMultipartUploadDetails: oci_object_storage.CommitMultipartUploadDetails{
+			PartsToCommit: commitMultipartUploadPartDetails,
+		},
 	}
-
-	_, err = client.CommitMultipartUpload(context.Background(), commitMultipartUploadRequest)
+	_, err = multipartUploadData.client.objectStorageClient.CommitMultipartUpload(context.Background(), commitMultipartUploadRequest)
 	if err != nil {
-		return "", fmt.Errorf("failed to commit multipart upload: %s", err)
+		return fmt.Errorf("failed to commit multipart upload: %s", err)
 	}
 
-	return "Upload successful", nil
+	return nil
 }
-func objectMultiPartSplit(data []byte) ([]objectStorageSourceBlock, error) {
-	dataSize := int64(len(data))
+func (m MultipartUploadData) objectMultiPartSplit() ([]objectStorageSourceBlock, error) {
+	dataSize := int64(len(m.Data))
 	offsets, limits, _ := SplitSizeToOffsetsAndLimits(dataSize)
 
 	sourceBlocks := make([]objectStorageSourceBlock, len(offsets))
@@ -154,8 +161,8 @@ func objectMultiPartSplit(data []byte) ([]objectStorageSourceBlock, error) {
 			end = dataSize
 		}
 		sourceBlocks[i] = objectStorageSourceBlock{
-			section:     io.NewSectionReader(bytes.NewReader(data), start, end-start),
-			blockNumber: &i,
+			section:     io.NewSectionReader(bytes.NewReader(m.Data), start, end-start),
+			blockNumber: common.Int(i + 1),
 		}
 	}
 	return sourceBlocks, nil
@@ -175,12 +182,13 @@ func SplitSizeToOffsetsAndLimits(size int64) ([]int64, []int64, error) {
 	return offsets, limits, nil
 }
 
-func uploadPartsWorker(ctx objectStorageMultiPartUploadContext) error {
+func (ctx *objectStorageMultiPartUploadContext) uploadPartsWorker() {
 	for block := range ctx.sourceBlocks {
 		buffer := make([]byte, block.section.Size())
 		_, err := block.section.Read(buffer)
 		if err != nil {
-			return fmt.Errorf("error reading source block %d: %w", block.blockNumber, err)
+			ctx.errChan <- fmt.Errorf("error reading source block %d: %w", block.blockNumber, err)
+			return
 		}
 		tmpLength := int64(len(buffer))
 
@@ -197,63 +205,17 @@ func uploadPartsWorker(ctx objectStorageMultiPartUploadContext) error {
 			},
 		}
 
-		_, err := ctx.client.UploadPart(context.Background(), *uploadPartRequest)
+		response, err := ctx.client.UploadPart(context.Background(), *uploadPartRequest)
+		if err != nil {
+			ctx.errChan <- fmt.Errorf("failed to upload part %d: %w", *block.blockNumber, err)
+			return
+		}
+		ctx.osUploadPartResponses <- objectStorageUploadPartResponse{
+			response:   response,
+			error:      nil,
+			partNumber: block.blockNumber,
+		}
 		ctx.wg.Done()
-		if err != nil {
-			logger.Error("Failed to upload part #%d: %s", block.blockNumber, err)
-			return err
-		}
+
 	}
-	return nil
-}
-
-func DeleteAllObjectVersions(client *oci_object_storage.ObjectStorageClient, bucket string, namespace string, prefix string) error {
-	request := oci_object_storage.ListObjectVersionsRequest{}
-
-	request.BucketName = &bucket
-	request.NamespaceName = &namespace
-
-	if prefix != "" {
-		request.Prefix = &prefix
-	}
-
-	response, err := client.ListObjectVersions(context.Background(), request)
-	if err != nil {
-		return err
-	}
-
-	request.Page = response.OpcNextPage
-
-	for request.Page != nil {
-		request.RequestMetadata.RetryPolicy = getDefaultRetryPolicy()
-
-		listResponse, err := client.ListObjectVersions(context.Background(), request)
-		if err != nil {
-			return err
-		}
-		response.Items = append(response.Items, listResponse.Items...)
-		request.Page = listResponse.OpcNextPage
-	}
-
-	var errors []string
-	for _, objectVersion := range response.Items {
-
-		deleteObjectVersionRequest := oci_object_storage.DeleteObjectRequest{}
-		deleteObjectVersionRequest.BucketName = &bucket
-		deleteObjectVersionRequest.NamespaceName = &namespace
-		deleteObjectVersionRequest.ObjectName = objectVersion.Name
-		deleteObjectVersionRequest.VersionId = objectVersion.VersionId
-
-		deleteObjectVersionRequest.RequestMetadata.RetryPolicy = getDefaultRetryPolicy()
-
-		_, err := client.DeleteObject(context.Background(), deleteObjectVersionRequest)
-		if err != nil {
-			errors = append(errors, err.Error())
-		}
-	}
-	if len(errors) > 0 {
-		return fmt.Errorf("%v", errors)
-	}
-
-	return nil
 }
