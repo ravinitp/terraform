@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/oracle/oci-go-sdk/v65/objectstorage"
 	"io"
 	"sync"
 
 	"github.com/oracle/oci-go-sdk/v65/common"
-	oci_object_storage "github.com/oracle/oci-go-sdk/v65/objectstorage"
 )
 
 const DefaultFilePartSize int64 = 64 * 1024 // 128 * 1024 * 1024 // 128MB
@@ -23,19 +23,19 @@ type MultipartUploadData struct {
 }
 
 type objectStorageUploadPartResponse struct {
-	response   oci_object_storage.UploadPartResponse
+	response   objectstorage.UploadPartResponse
 	partNumber *int
 	error      error
 }
 
 type objectStorageMultiPartUploadContext struct {
-	client                  *oci_object_storage.ObjectStorageClient
+	client                  *objectstorage.ObjectStorageClient
 	sourceBlocks            chan objectStorageSourceBlock
 	osUploadPartResponses   chan objectStorageUploadPartResponse
 	wg                      *sync.WaitGroup
 	errChan                 chan error
-	multipartUploadResponse oci_object_storage.CreateMultipartUploadResponse
-	multipartUploadRequest  oci_object_storage.CreateMultipartUploadRequest
+	multipartUploadResponse objectstorage.CreateMultipartUploadResponse
+	multipartUploadRequest  objectstorage.CreateMultipartUploadRequest
 }
 
 type objectStorageSourceBlock struct {
@@ -50,11 +50,11 @@ func (multipartUploadData MultipartUploadData) multiPartUploadImpl() error {
 		return fmt.Errorf("error splitting source data: %s", err)
 	}
 
-	multipartUploadRequest := &oci_object_storage.CreateMultipartUploadRequest{
+	multipartUploadRequest := &objectstorage.CreateMultipartUploadRequest{
 		NamespaceName:   common.String(multipartUploadData.client.namespace),
 		BucketName:      common.String(multipartUploadData.client.bucketName),
 		RequestMetadata: multipartUploadData.RequestMetadata,
-		CreateMultipartUploadDetails: oci_object_storage.CreateMultipartUploadDetails{
+		CreateMultipartUploadDetails: objectstorage.CreateMultipartUploadDetails{
 			Object: common.String(multipartUploadData.client.path),
 		},
 	}
@@ -103,14 +103,14 @@ func (multipartUploadData MultipartUploadData) multiPartUploadImpl() error {
 			return workerErr
 		}
 	}
-	commitMultipartUploadPartDetails := make([]oci_object_storage.CommitMultipartUploadPartDetails, len(sourceBlocks))
+	commitMultipartUploadPartDetails := make([]objectstorage.CommitMultipartUploadPartDetails, len(sourceBlocks))
 	i := 0
 	for response := range osUploadPartResponses {
 		if response.error != nil || response.partNumber == nil || response.response.ETag == nil {
 			return fmt.Errorf("failed to upload part: %s", response.error)
 		}
 		partNumber, etag := *response.partNumber, *response.response.ETag
-		commitMultipartUploadPartDetails[i] = oci_object_storage.CommitMultipartUploadPartDetails{
+		commitMultipartUploadPartDetails[i] = objectstorage.CommitMultipartUploadPartDetails{
 			PartNum: common.Int(partNumber),
 			Etag:    common.String(etag),
 		}
@@ -118,7 +118,7 @@ func (multipartUploadData MultipartUploadData) multiPartUploadImpl() error {
 	}
 
 	if len(commitMultipartUploadPartDetails) != len(sourceBlocks) {
-		abortReq := oci_object_storage.AbortMultipartUploadRequest{
+		abortReq := objectstorage.AbortMultipartUploadRequest{
 			UploadId:      multipartUploadResponse.MultipartUpload.UploadId,
 			NamespaceName: multipartUploadResponse.Namespace,
 			BucketName:    multipartUploadResponse.Bucket,
@@ -131,14 +131,14 @@ func (multipartUploadData MultipartUploadData) multiPartUploadImpl() error {
 		return fmt.Errorf("not all parts uploaded successfully, multipart upload aborted")
 	}
 
-	commitMultipartUploadRequest := oci_object_storage.CommitMultipartUploadRequest{
+	commitMultipartUploadRequest := objectstorage.CommitMultipartUploadRequest{
 		UploadId:           multipartUploadResponse.MultipartUpload.UploadId,
 		NamespaceName:      multipartUploadResponse.Namespace,
 		BucketName:         multipartUploadResponse.Bucket,
 		ObjectName:         multipartUploadResponse.Object,
 		OpcClientRequestId: multipartUploadResponse.OpcClientRequestId,
 		RequestMetadata:    multipartUploadRequest.RequestMetadata,
-		CommitMultipartUploadDetails: oci_object_storage.CommitMultipartUploadDetails{
+		CommitMultipartUploadDetails: objectstorage.CommitMultipartUploadDetails{
 			PartsToCommit: commitMultipartUploadPartDetails,
 		},
 	}
@@ -192,7 +192,7 @@ func (ctx *objectStorageMultiPartUploadContext) uploadPartsWorker() {
 		}
 		tmpLength := int64(len(buffer))
 
-		uploadPartRequest := &oci_object_storage.UploadPartRequest{
+		uploadPartRequest := &objectstorage.UploadPartRequest{
 			UploadId:       ctx.multipartUploadResponse.UploadId,
 			ObjectName:     ctx.multipartUploadResponse.Object,
 			NamespaceName:  ctx.multipartUploadResponse.Namespace,

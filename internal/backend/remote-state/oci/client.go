@@ -33,7 +33,17 @@ func (c *RemoteClient) Get() (*remote.Payload, error) {
 
 	logger.Debug("Downloading remote state")
 
-	return c.getObject(ctx)
+	payload, err := c.getObject(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if md5Hash, err := c.getMd5(ctx); err != nil {
+		logger.Warn("Failed to download MD5 hash of remote state")
+	} else if !bytes.Equal(md5Hash, payload.MD5) {
+		logger.Error("state md5 mismatch expected: %s, actual: %s", string(md5Hash), string(payload.MD5))
+		return payload, fmt.Errorf("state md5 mismatch expected: %s, actual: %s", string(md5Hash), string(payload.MD5))
+	}
+	return payload, nil
 }
 
 func (c *RemoteClient) getObject(ctx context.Context) (*remote.Payload, error) {
@@ -123,8 +133,30 @@ func (c *RemoteClient) getObject(ctx context.Context) (*remote.Payload, error) {
 	return payload, nil
 }
 
+func (c *RemoteClient) getMd5(ctx context.Context) ([]byte, error) {
+	getRequest := objectstorage.GetObjectRequest{
+		NamespaceName: common.String(c.namespace),
+		ObjectName:    common.String(fmt.Sprintf("%s.md5", c.path)),
+		BucketName:    common.String(c.bucketName),
+		RequestMetadata: common.RequestMetadata{
+			RetryPolicy: getDefaultRetryPolicy(),
+		},
+	}
+	getResponse, err := c.objectStorageClient.GetObject(ctx, getRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download md5 hash of statefile: %w", err)
+	}
+	var data []byte
+	_, err = getResponse.Content.Read(data)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
 func (c *RemoteClient) Put(data []byte) error {
 	dataSize := int64(len(data))
+	sum := md5.Sum(data)
+	var err error
 	if dataSize > DefaultFilePartSize {
 		logger.Info("Using Multipart Feature")
 		var multipartUploadData = MultipartUploadData{
@@ -134,28 +166,34 @@ func (c *RemoteClient) Put(data []byte) error {
 				RetryPolicy: getDefaultRetryPolicy(),
 			},
 		}
-		return multipartUploadData.multiPartUploadImpl()
+		err = multipartUploadData.multiPartUploadImpl()
 	} else {
-		return c.putObject(data)
+		err = c.uploadSinglePartObject(data, sum[:])
 	}
+	if err != nil {
+		return err
+	}
+	return c.putMd5(sum[:])
 }
 
-func (c *RemoteClient) putObject(data []byte) error {
+func (c *RemoteClient) uploadSinglePartObject(data, sum []byte) error {
 	if len(data) == 0 {
-		return fmt.Errorf("putObject: data is empty")
+		return fmt.Errorf("uploadSinglePartObject: data is empty")
 	}
 
 	ctx := context.Background()
 	contentType := "application/json"
-	sum := md5.Sum(data)
 
 	putRequest := objectstorage.PutObjectRequest{
 		ContentType:   common.String(contentType),
 		NamespaceName: common.String(c.namespace),
 		ObjectName:    common.String(c.path),
 		BucketName:    common.String(c.bucketName),
-		PutObjectBody: io.NopCloser(bytes.NewReader(data)),                      // ✅ Use NewReader instead of NewBuffer
-		ContentMD5:    common.String(base64.StdEncoding.EncodeToString(sum[:])), // ✅ Fix MD5 encoding
+		PutObjectBody: io.NopCloser(bytes.NewReader(data)),
+		ContentMD5:    common.String(base64.StdEncoding.EncodeToString(sum)),
+		RequestMetadata: common.RequestMetadata{
+			RetryPolicy: getDefaultRetryPolicy(),
+		},
 	}
 
 	// Handle encryption settings
@@ -181,6 +219,32 @@ func (c *RemoteClient) putObject(data []byte) error {
 	logger.Debug("Uploaded statefile response: %+v\n", putResponse)
 	return nil
 }
+
+func (c *RemoteClient) putMd5(data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("uploadSinglePartObject: data is empty")
+	}
+
+	ctx := context.Background()
+	sum := md5.Sum(data)
+
+	putRequest := objectstorage.PutObjectRequest{
+		NamespaceName: common.String(c.namespace),
+		ObjectName:    common.String(fmt.Sprintf("%s.md5", c.path)),
+		BucketName:    common.String(c.bucketName),
+		PutObjectBody: io.NopCloser(bytes.NewReader(data)),
+		ContentMD5:    common.String(base64.StdEncoding.EncodeToString(sum[:])),
+		RequestMetadata: common.RequestMetadata{
+			RetryPolicy: getDefaultRetryPolicy(),
+		},
+	}
+	_, err := c.objectStorageClient.PutObject(ctx, putRequest)
+	if err != nil {
+		return fmt.Errorf("failed to upload md5Hash: %w", err)
+	}
+	return nil
+}
+
 func (c *RemoteClient) Delete() error {
 
 	return c.DeleteAllObjectVersions()
@@ -190,6 +254,9 @@ func (c *RemoteClient) DeleteAllObjectVersions() error {
 		BucketName:    common.String(c.bucketName),
 		NamespaceName: common.String(c.namespace),
 		Prefix:        common.String(c.path),
+		RequestMetadata: common.RequestMetadata{
+			RetryPolicy: getDefaultRetryPolicy(),
+		},
 	}
 
 	response, err := c.objectStorageClient.ListObjectVersions(context.Background(), request)
@@ -219,6 +286,9 @@ func (c *RemoteClient) DeleteAllObjectVersions() error {
 			NamespaceName: common.String(c.namespace),
 			ObjectName:    objectVersion.Name,
 			VersionId:     objectVersion.VersionId,
+			RequestMetadata: common.RequestMetadata{
+				RetryPolicy: getDefaultRetryPolicy(),
+			},
 		}
 
 		deleteObjectVersionRequest.RequestMetadata.RetryPolicy = getDefaultRetryPolicy()
@@ -248,6 +318,9 @@ func (c *RemoteClient) Lock(info *statemgr.LockInfo) (string, error) {
 		ObjectName:    common.String(c.lockFilePath),
 		IfNoneMatch:   common.String("*"),
 		PutObjectBody: io.NopCloser(bytes.NewReader(infoBytes)),
+		RequestMetadata: common.RequestMetadata{
+			RetryPolicy: getDefaultRetryPolicy(),
+		},
 	}
 
 	putResponse, putErr := c.objectStorageClient.PutObject(ctx, putObjReq)
@@ -264,7 +337,11 @@ func (c *RemoteClient) Unlock(id string) error {
 		NamespaceName: common.String(c.namespace),
 		ObjectName:    common.String(c.lockFilePath),
 		BucketName:    common.String(c.bucketName),
+		RequestMetadata: common.RequestMetadata{
+			RetryPolicy: getDefaultRetryPolicy(),
+		},
 	}
+
 	getResponse, err := c.objectStorageClient.GetObject(ctx, getRequest)
 	if err != nil {
 		return err
@@ -286,6 +363,10 @@ func (c *RemoteClient) Unlock(id string) error {
 		NamespaceName: common.String(c.namespace),
 		ObjectName:    common.String(c.lockFilePath),
 		BucketName:    common.String(c.bucketName),
+		IfMatch:       getResponse.ETag,
+		RequestMetadata: common.RequestMetadata{
+			RetryPolicy: getDefaultRetryPolicy(),
+		},
 	}
 	deleteResponse, err := c.objectStorageClient.DeleteObject(ctx, deleteRequest)
 	if err != nil {
