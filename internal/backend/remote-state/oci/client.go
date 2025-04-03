@@ -151,7 +151,13 @@ func (c *RemoteClient) getMd5(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return data, nil
+	// Read object content
+	contentArray, err := io.ReadAll(getResponse.Content)
+	if err != nil {
+		return nil, fmt.Errorf("[MD5]unable to read 'content' from response: %w", err)
+	}
+
+	return contentArray, nil
 }
 func (c *RemoteClient) Put(data []byte) error {
 	dataSize := int64(len(data))
@@ -173,7 +179,8 @@ func (c *RemoteClient) Put(data []byte) error {
 	if err != nil {
 		return err
 	}
-	return c.putMd5(sum[:])
+
+	return c.putMd5([]byte(base64.StdEncoding.EncodeToString(sum[:])))
 }
 
 func (c *RemoteClient) uploadSinglePartObject(data, sum []byte) error {
