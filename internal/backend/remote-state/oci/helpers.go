@@ -3,6 +3,8 @@ package oci
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/base64"
 	"fmt"
 	"github.com/oracle/oci-go-sdk/v65/objectstorage"
 	"io"
@@ -11,7 +13,7 @@ import (
 	"github.com/oracle/oci-go-sdk/v65/common"
 )
 
-const DefaultFilePartSize int64 = 64 * 1024 // 128 * 1024 * 1024 // 128MB
+const DefaultFilePartSize int64 = 5 * 1024 * 1024 // 5MB
 const defaultNumberOfGoroutines = 10
 const MaxPartSize int64 = 50 * 1024 * 1024 * 1024
 const MaxCount int64 = 10000
@@ -191,7 +193,7 @@ func (ctx *objectStorageMultiPartUploadContext) uploadPartsWorker() {
 			return
 		}
 		tmpLength := int64(len(buffer))
-
+		sum := md5.Sum(buffer)
 		uploadPartRequest := &objectstorage.UploadPartRequest{
 			UploadId:       ctx.multipartUploadResponse.UploadId,
 			ObjectName:     ctx.multipartUploadResponse.Object,
@@ -200,6 +202,7 @@ func (ctx *objectStorageMultiPartUploadContext) uploadPartsWorker() {
 			ContentLength:  &tmpLength,
 			UploadPartBody: io.NopCloser(bytes.NewReader(buffer)),
 			UploadPartNum:  block.blockNumber,
+			ContentMD5:     common.String(base64.StdEncoding.EncodeToString(sum[:])),
 			RequestMetadata: common.RequestMetadata{
 				RetryPolicy: getDefaultRetryPolicy(),
 			},
