@@ -1,6 +1,8 @@
 package oci
 
 import (
+	"errors"
+	"github.com/mitchellh/go-testing-interface"
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/objectstorage"
 	"github.com/stretchr/testify/assert"

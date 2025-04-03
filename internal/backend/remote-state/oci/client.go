@@ -26,6 +26,7 @@ type RemoteClient struct {
 	customerEncryptionKeySHA256 []byte
 	encryptionAlgorithm         string
 	kmsKeyID                    string
+	etag                        string
 }
 
 func (c *RemoteClient) Get() (*remote.Payload, error) {
@@ -76,6 +77,9 @@ func (c *RemoteClient) getObject(ctx context.Context) (*remote.Payload, error) {
 			return nil, fmt.Errorf("failed to access object '%s' in bucket '%s': %w", c.path, c.bucketName, headErr)
 		}
 	}
+
+	c.etag = *headResponse.ETag
+
 	getRequest := objectstorage.GetObjectRequest{
 		NamespaceName: common.String(c.namespace),
 		ObjectName:    common.String(c.path),
@@ -202,7 +206,9 @@ func (c *RemoteClient) uploadSinglePartObject(data, sum []byte) error {
 			RetryPolicy: getDefaultRetryPolicy(),
 		},
 	}
-
+	if c.etag != "" {
+		putRequest.IfMatch = common.String(c.etag)
+	}
 	// Handle encryption settings
 	if c.kmsKeyID != "" {
 		putRequest.OpcSseKmsKeyId = common.String(c.kmsKeyID)

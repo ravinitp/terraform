@@ -15,7 +15,6 @@ import (
 
 const DefaultFilePartSize int64 = 5 * 1024 * 1024 // 5MB
 const defaultNumberOfGoroutines = 10
-const MaxPartSize int64 = 50 * 1024 * 1024 * 1024
 const MaxCount int64 = 10000
 
 type MultipartUploadData struct {
@@ -60,7 +59,9 @@ func (multipartUploadData MultipartUploadData) multiPartUploadImpl() error {
 			Object: common.String(multipartUploadData.client.path),
 		},
 	}
-
+	if multipartUploadData.client.etag != "" {
+		multipartUploadRequest.IfMatch = common.String(multipartUploadData.client.etag)
+	}
 	multipartUploadResponse, err := multipartUploadData.client.objectStorageClient.CreateMultipartUpload(context.Background(), *multipartUploadRequest)
 	if err != nil {
 		return fmt.Errorf("error creating multipart upload: %s", err)
