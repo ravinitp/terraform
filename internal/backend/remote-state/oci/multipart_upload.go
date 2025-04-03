@@ -30,7 +30,7 @@ type objectStorageUploadPartResponse struct {
 }
 
 type objectStorageMultiPartUploadContext struct {
-	client                  *objectstorage.ObjectStorageClient
+	client                  *RemoteClient
 	sourceBlocks            chan objectStorageSourceBlock
 	osUploadPartResponses   chan objectStorageUploadPartResponse
 	wg                      *sync.WaitGroup
@@ -59,6 +59,18 @@ func (multipartUploadData MultipartUploadData) multiPartUploadImpl() error {
 			Object: common.String(multipartUploadData.client.path),
 		},
 	}
+	if multipartUploadData.client.kmsKeyID != "" {
+		multipartUploadRequest.OpcSseKmsKeyId = common.String(multipartUploadData.client.kmsKeyID)
+	} else if multipartUploadData.client.customerEncryptionKey != nil {
+		if len(multipartUploadData.client.customerEncryptionKey) > 0 && len(multipartUploadData.client.customerEncryptionKeySHA256) > 0 {
+			multipartUploadRequest.OpcSseCustomerKey = common.String(base64.StdEncoding.EncodeToString(multipartUploadData.client.customerEncryptionKey))
+			multipartUploadRequest.OpcSseCustomerKeySha256 = common.String(base64.StdEncoding.EncodeToString(multipartUploadData.client.customerEncryptionKeySHA256))
+		}
+		if len(multipartUploadData.client.encryptionAlgorithm) > 0 {
+			multipartUploadRequest.OpcSseCustomerAlgorithm = common.String(multipartUploadData.client.encryptionAlgorithm)
+		}
+	}
+
 	if multipartUploadData.client.etag != "" {
 		multipartUploadRequest.IfMatch = common.String(multipartUploadData.client.etag)
 	}
@@ -84,7 +96,7 @@ func (multipartUploadData MultipartUploadData) multiPartUploadImpl() error {
 	for i := 0; i < workerCount; i++ {
 		go func() {
 			ctx := &objectStorageMultiPartUploadContext{
-				client:                  multipartUploadData.client.objectStorageClient,
+				client:                  multipartUploadData.client,
 				wg:                      wg,
 				errChan:                 errChan,
 				multipartUploadResponse: multipartUploadResponse,
@@ -209,7 +221,19 @@ func (ctx *objectStorageMultiPartUploadContext) uploadPartsWorker() {
 			},
 		}
 
-		response, err := ctx.client.UploadPart(context.Background(), *uploadPartRequest)
+		if ctx.client.kmsKeyID != "" {
+			uploadPartRequest.OpcSseKmsKeyId = common.String(ctx.client.kmsKeyID)
+		} else if ctx.client.customerEncryptionKey != nil {
+			if len(ctx.client.customerEncryptionKey) > 0 && len(ctx.client.customerEncryptionKeySHA256) > 0 {
+				uploadPartRequest.OpcSseCustomerKey = common.String(base64.StdEncoding.EncodeToString(ctx.client.customerEncryptionKey))
+				uploadPartRequest.OpcSseCustomerKeySha256 = common.String(base64.StdEncoding.EncodeToString(ctx.client.customerEncryptionKeySHA256))
+			}
+			if len(ctx.client.encryptionAlgorithm) > 0 {
+				uploadPartRequest.OpcSseCustomerAlgorithm = common.String(ctx.client.encryptionAlgorithm)
+			}
+		}
+
+		response, err := ctx.client.objectStorageClient.UploadPart(context.Background(), *uploadPartRequest)
 		if err != nil {
 			ctx.errChan <- fmt.Errorf("failed to upload part %d: %w", *block.blockNumber, err)
 			return
