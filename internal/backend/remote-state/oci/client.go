@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package oci
 
 import (
@@ -111,7 +114,7 @@ func (c *RemoteClient) getObject(ctx context.Context) (*remote.Payload, error) {
 		}
 		return nil, fmt.Errorf("failed to access object '%s' in bucket '%s': %w", c.path, c.bucketName, err)
 	}
-	defer getResponse.Content.Close() // ✅ Ensure response body is closed
+	defer getResponse.Content.Close()
 
 	// Read object content
 	contentArray, err := io.ReadAll(getResponse.Content)

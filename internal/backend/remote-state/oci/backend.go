@@ -23,91 +23,98 @@ func New() backend.Backend {
 func (b *Backend) ConfigSchema() *configschema.Block {
 	return &configschema.Block{
 		Attributes: map[string]*configschema.Attribute{
-			"key": {
+			KeyAttrName: {
 				Type:        cty.String,
-				Required:    true,
+				Optional:    true,
 				Description: "The name of the state file stored on the remote backend.",
 			},
-			"bucket": {
+			BucketAttrName: {
 				Type:        cty.String,
 				Required:    true,
 				Description: "The name of the OCI Object Storage bucket.",
 			},
-			"namespace": {
+			NamespaceAttrName: {
 				Type:        cty.String,
 				Required:    true,
 				Description: "The namespace of the OCI Object Storage.",
 			},
-			"region": {
+			RegionAttrName: {
 				Type:        cty.String,
 				Optional:    true,
 				Description: "OCI region where the bucket is located.",
 			},
-			"tenancy_ocid": {
+			TenancyOcidAttrName: {
 				Type:        cty.String,
 				Optional:    true,
 				Description: "The OCID of the tenancy.",
 			},
-			"user_ocid": {
+			UserOcidAttrName: {
 				Type:        cty.String,
 				Optional:    true,
 				Description: "The OCID of the user.",
 			},
-			"fingerprint": {
+			FingerprintAttrName: {
 				Type:        cty.String,
 				Optional:    true,
 				Description: "The fingerprint of the user's API key.",
 			},
-			"private_key": {
+			PrivateKeyAttrName: {
 				Type:        cty.String,
 				Sensitive:   true,
 				Optional:    true,
 				Description: "The private key for API authentication.",
 			},
-			"private_key_path": {
+			PrivateKeyPathAttrName: {
 				Type:        cty.String,
 				Optional:    true,
 				Description: "Path to the private key file.",
 			},
-			"private_key_password": {
+			PrivateKeyPasswordAttrName: {
 				Type:        cty.String,
 				Sensitive:   true,
 				Optional:    true,
 				Description: "Passphrase for the private key, if required.",
 			},
-			"auth_type": {
+			AuthAttrName: {
 				Type:        cty.String,
 				Optional:    true,
 				Description: "Authentication method (API key, Instance Principal, Resource Principal, etc.).",
 			},
 
-			"config_file_profile": {
+			ConfigFileProfileAttrName: {
 				Type:        cty.String,
 				Optional:    true,
 				Description: "Profile name from the OCI config file.",
 			},
-			"workspace_key_prefix": {
+			WorkspaceKeyPrefixAttrName: {
 				Type:        cty.String,
 				Optional:    true,
 				Description: "The prefix applied to the non-default state path inside the bucket.",
+			},
+			KmsKeyIdAttrName: {
+				Type:        cty.String,
+				Optional:    true,
+				Description: "The OCID of a master encryption key used to call the Key Management service to generate a data encryption key or to encrypt or decrypt a data encryption key.",
+			},
+			CustomerEncryptionKeyAttrName: {
+				Type:        cty.String,
+				Optional:    true,
+				Description: "base64-encoded 256-bit encryption key to use to encrypt or decrypt the data",
+			},
+			CustomerEncryptionKeySHA256AttrName: {
+				Type:        cty.String,
+				Optional:    true,
+				Description: "base64-encoded SHA256 hash of the encryption key. This value is used to check the integrity of the encryption key.",
 			},
 		},
 	}
 }
 
 type Backend struct {
+	configProvider     *ociAuthConfigProvider
 	bucket             string
 	key                string
 	namespace          string
-	region             string
-	tenancyOcid        string
-	userOcid           string
-	fingerprint        string
-	privateKey         string
-	privateKeyPath     string
-	privateKeyPassword string
-	authType           string
-	configFileProfile  string
 	workspaceKeyPrefix string
 	client             *RemoteClient
 }
@@ -123,40 +130,24 @@ func (b *Backend) Configure(obj cty.Value) tfdiags.Diagnostics {
 		return diags
 	}
 
-	if bucketVal := obj.GetAttr("bucket"); bucketVal.IsKnown() && !bucketVal.IsNull() {
+	if bucketVal, ok := getBackendAttr(obj, BucketAttrName); ok {
 		b.bucket = bucketVal.AsString()
-	} else {
-		diags.Append(tfdiags.AttributeValue(tfdiags.Error, "Missing Required Attribute", "Bucket name cannot be null", cty.GetAttrPath("bucket")))
 	}
-	if namespaceVal := obj.GetAttr("namespace"); namespaceVal.IsKnown() && !namespaceVal.IsNull() {
+	if namespaceVal, ok := getBackendAttr(obj, NamespaceAttrName); ok {
 		b.namespace = namespaceVal.AsString()
 	} else {
 		diags.Append(tfdiags.AttributeValue(tfdiags.Error, "Missing Required Attribute", "Bucket name cannot be null", cty.GetAttrPath("namespace")))
 	}
-	if keyVal := obj.GetAttr("key"); keyVal.IsKnown() && !keyVal.IsNull() {
+	if keyVal, ok := getBackendAttrWithDefault(obj, KeyAttrName, defaultKeyValue); ok {
 		b.key = keyVal.AsString()
-	} else {
-		diags.Append(tfdiags.AttributeValue(tfdiags.Error, "Missing Required Attribute", "The 'key' attribute must be specified.", cty.GetAttrPath("key")))
 	}
 
-	if regionVal := obj.GetAttr("region"); regionVal.IsKnown() && !regionVal.IsNull() {
-		b.region = regionVal.AsString()
-	}
-
-	if tenancyOcidVal := obj.GetAttr("tenancy_ocid"); tenancyOcidVal.IsKnown() && !tenancyOcidVal.IsNull() {
-		b.tenancyOcid = tenancyOcidVal.AsString()
-	}
-
-	if userOcidVal := obj.GetAttr("user_ocid"); userOcidVal.IsKnown() && !userOcidVal.IsNull() {
-		b.userOcid = userOcidVal.AsString()
-	}
-
-	if workspaceKeyPrefixVal := obj.GetAttr("workspace_key_prefix"); workspaceKeyPrefixVal.IsKnown() && !workspaceKeyPrefixVal.IsNull() {
+	if workspaceKeyPrefixVal, ok := getBackendAttr(obj, WorkspaceKeyPrefixAttrName); ok {
 		b.workspaceKeyPrefix = workspaceKeyPrefixVal.AsString()
 	} else {
 		b.workspaceKeyPrefix = defaultEnvPrefix
 	}
-
+	b.configProvider = newOciAuthConfigProvider(obj)
 	return diags
 }
 
