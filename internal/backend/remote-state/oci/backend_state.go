@@ -37,9 +37,13 @@ func (b *Backend) configureRemoteClient() error {
 		return err
 	}
 	b.client = &RemoteClient{
-		objectStorageClient: &client,
-		bucketName:          b.bucket,
-		namespace:           b.namespace,
+		objectStorageClient:         &client,
+		bucketName:                  b.bucket,
+		namespace:                   b.namespace,
+		kmsKeyID:                    b.kmsKeyID,
+		customerEncryptionKey:       b.customerEncryptionKey,
+		customerEncryptionKeySHA256: b.customerEncryptionKeySHA256,
+		encryptionAlgorithm:         b.encryptionAlgorithm,
 	}
 	return nil
 }
@@ -74,7 +78,11 @@ func (b *Backend) Workspaces() ([]string, error) {
 			key := *object.Name
 			if strings.HasPrefix(key, b.workspaceKeyPrefix) {
 				name := strings.TrimPrefix(key, b.workspaceKeyPrefix+"/")
-				name = strings.TrimSuffix(name, "/"+b.key)
+				name = strings.TrimSuffix(name, ".md5")
+				name = strings.TrimSuffix(name, ".lock")
+				name = strings.TrimSuffix(name, b.key)
+				name = strings.TrimSuffix(name, "/")
+
 				if name != "" {
 					wss = append(wss, name)
 				}
@@ -87,7 +95,7 @@ func (b *Backend) Workspaces() ([]string, error) {
 
 	}
 
-	return wss, nil
+	return uniqueStrings(wss), nil
 }
 
 func (b *Backend) DeleteWorkspace(name string, force bool) error {

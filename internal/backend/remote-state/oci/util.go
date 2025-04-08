@@ -92,3 +92,15 @@ func getBackendAttrWithDefault(obj cty.Value, attrName, def string) (cty.Value, 
 func getBackendAttr(obj cty.Value, attrName string) (cty.Value, bool) {
 	return getBackendAttrWithDefault(obj, attrName, "")
 }
+func uniqueStrings(input []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+
+	for _, val := range input {
+		if !seen[val] {
+			seen[val] = true
+			result = append(result, val)
+		}
+	}
+	return result
+}
