@@ -277,17 +277,10 @@ func (p *ociAuthConfigProvider) getConfigProviders() ([]common.ConfigurationProv
 }
 func (p *ociAuthConfigProvider) getSdkConfigProvider() (common.ConfigurationProvider, error) {
 
-	//profile := d.Get(globalvar.ConfigFileProfileAttrName).(string)
-	//clients.Configuration[globalvar.AuthAttrName] = auth
-	//
 	configProviders, err := p.getConfigProviders()
 	if err != nil {
 		return nil, err
 	}
-	//resourceDataConfigProvider := ResourceDataConfigProvider{d}
-	//if region, error := resourceDataConfigProvider.Region(); error == nil {
-	//	clients.Configuration["region"] = region
-	//}
 
 	//In GoSDK, the first step is to check if AuthType exists,
 	//for composite provider, we only check the first provider in the list for the AuthType.

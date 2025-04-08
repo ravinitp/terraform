@@ -5,6 +5,7 @@ package oci
 
 import (
 	"github.com/hashicorp/terraform/internal/backend"
+	"github.com/hashicorp/terraform/internal/backend/backendbase"
 	"github.com/hashicorp/terraform/internal/configs/configschema"
 	"github.com/hashicorp/terraform/internal/tfdiags"
 	"github.com/zclconf/go-cty/cty"
@@ -111,12 +112,16 @@ func (b *Backend) ConfigSchema() *configschema.Block {
 }
 
 type Backend struct {
-	configProvider     *ociAuthConfigProvider
-	bucket             string
-	key                string
-	namespace          string
-	workspaceKeyPrefix string
-	client             *RemoteClient
+	configProvider              *ociAuthConfigProvider
+	bucket                      string
+	key                         string
+	namespace                   string
+	workspaceKeyPrefix          string
+	customerEncryptionKey       []byte
+	customerEncryptionKeySHA256 []byte
+	encryptionAlgorithm         string
+	kmsKeyID                    string
+	client                      *RemoteClient
 }
 
 func (b *Backend) PrepareConfig(obj cty.Value) (cty.Value, tfdiags.Diagnostics) {
@@ -147,7 +152,28 @@ func (b *Backend) Configure(obj cty.Value) tfdiags.Diagnostics {
 	} else {
 		b.workspaceKeyPrefix = defaultEnvPrefix
 	}
+
+	if kmsKeyIdVal, ok := getBackendAttr(obj, KmsKeyIdAttrName); ok {
+		b.kmsKeyID = kmsKeyIdVal.AsString()
+	}
+
+	if customerKeyVal, ok := getBackendAttr(obj, CustomerEncryptionKeyAttrName); ok {
+		b.customerEncryptionKey = []byte(customerKeyVal.AsString())
+	}
+
+	if customerKeyShaVal, ok := getBackendAttr(obj, CustomerEncryptionKeySHA256AttrName); ok {
+		b.customerEncryptionKeySHA256 = []byte(customerKeyShaVal.AsString())
+	}
+
+	if encryptionAlgorithmVal, ok := getBackendAttr(obj, EncryptionAlgorithm); ok {
+		b.encryptionAlgorithm = encryptionAlgorithmVal.AsString()
+	}
+
 	b.configProvider = newOciAuthConfigProvider(obj)
+	err := b.configureRemoteClient()
+	if err != nil {
+		diags = append(diags, backendbase.ErrorAsDiagnostics(err)[0])
+	}
 	return diags
 }
 

@@ -35,7 +35,7 @@ type RemoteClient struct {
 func (c *RemoteClient) Get() (*remote.Payload, error) {
 	ctx := context.TODO()
 
-	logger.Debug("Downloading remote state")
+	logger.Info("Downloading remote state")
 
 	payload, err := c.getObject(ctx)
 	if err != nil {
@@ -225,14 +225,14 @@ func (c *RemoteClient) uploadSinglePartObject(data, sum []byte) error {
 		}
 	}
 
-	logger.Debug("Uploading remote state")
+	logger.Info("Uploading remote state")
 
 	putResponse, err := c.objectStorageClient.PutObject(ctx, putRequest)
 	if err != nil {
 		return fmt.Errorf("failed to upload object: %w", err)
 	}
 
-	logger.Debug("Uploaded statefile response: %+v\n", putResponse)
+	logger.Info("Uploaded statefile response: %+v\n", putResponse)
 	return nil
 }
 

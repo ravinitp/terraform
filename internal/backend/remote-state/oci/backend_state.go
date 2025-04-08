@@ -20,10 +20,6 @@ const (
 
 func (b *Backend) StateMgr(name string) (statemgr.Full, error) {
 
-	err := b.configureRemoteClient()
-	if err != nil {
-		return nil, err
-	}
 	b.client.path = b.path(name)
 	b.client.lockFilePath = b.getLockFilePath(name)
 	return &remote.State{Client: b.client}, nil
@@ -31,7 +27,11 @@ func (b *Backend) StateMgr(name string) (statemgr.Full, error) {
 
 func (b *Backend) configureRemoteClient() error {
 
-	client, err := objectstorage.NewObjectStorageClientWithConfigurationProvider(common.DefaultConfigProvider())
+	configProvider, err := b.configProvider.getSdkConfigProvider()
+	if err != nil {
+		return err
+	}
+	client, err := objectstorage.NewObjectStorageClientWithConfigurationProvider(configProvider)
 	common.SetSDKLogger(logger)
 	if err != nil {
 		return err

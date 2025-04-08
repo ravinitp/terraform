@@ -12,8 +12,6 @@ const (
 	AuthSecurityToken                     = "SecurityToken"
 	AuthOKEWorkloadIdentity               = "OKEWorkloadIdentity"
 	ResourcePrincipal                     = "ResourcePrincipal"
-	RequestHeaderOpcOboToken              = "opc-obo-token"
-	RequestHeaderOpcHostSerial            = "opc-host-serial"
 
 	TfEnvPrefix  = "TF_VAR_"
 	OciEnvPrefix = "OCI_"
@@ -30,16 +28,13 @@ const (
 	KmsKeyIdAttrName                    = "kms_key_id"
 	CustomerEncryptionKeyAttrName       = "customer_encryption_key"
 	CustomerEncryptionKeySHA256AttrName = "customer_encryption_key_sha256"
+	EncryptionAlgorithm                 = "encryption_algorithm"
 	KeyAttrName                         = "key"
 	defaultKeyValue                     = "terraform.tfstate"
 	BucketAttrName                      = "bucket"
 	NamespaceAttrName                   = "namespace"
 
-	DisableAutoRetriesAttrName   = "disable_auto_retries"
-	RetryDurationSecondsAttrName = "retry_duration_seconds"
-	OboTokenAttrName             = "obo_token"
-	OboTokenPath                 = "obo_token_path"
-	ConfigFileProfileAttrName    = "config_file_profile"
+	ConfigFileProfileAttrName = "config_file_profile"
 
 	AcceptLocalCerts = "accept_local_certs"
 
