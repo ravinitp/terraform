@@ -47,7 +47,7 @@ func newOciAuthConfigProvider(obj cty.Value) ociAuthConfigProvider {
 		p.region = regionVal.AsString()
 	}
 
-	if tenancyOcidVal, ok := getBackendAttr(obj, RegionAttrName); ok {
+	if tenancyOcidVal, ok := getBackendAttr(obj, TenancyOcidAttrName); ok {
 		p.tenancyOcid = tenancyOcidVal.AsString()
 	}
 
@@ -83,7 +83,6 @@ func (p ociAuthConfigProvider) AuthType() (common.AuthConfig, error) {
 }
 
 func (p ociAuthConfigProvider) TenancyOCID() (string, error) {
-	logger.Debug(fmt.Sprintf("tanancy: %s, bool: %v", p.tenancyOcid, (p.tenancyOcid != "")))
 	if p.tenancyOcid != "" {
 		return p.tenancyOcid, nil
 	}
