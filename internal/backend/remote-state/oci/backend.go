@@ -107,12 +107,17 @@ func (b *Backend) ConfigSchema() *configschema.Block {
 				Optional:    true,
 				Description: "base64-encoded SHA256 hash of the encryption key. This value is used to check the integrity of the encryption key.",
 			},
+			EncryptionAlgorithm: {
+				Type:        cty.String,
+				Optional:    true,
+				Description: "encryption algorithm",
+			},
 		},
 	}
 }
 
 type Backend struct {
-	configProvider              *ociAuthConfigProvider
+	configProvider              ociAuthConfigProvider
 	bucket                      string
 	key                         string
 	namespace                   string
@@ -170,6 +175,7 @@ func (b *Backend) Configure(obj cty.Value) tfdiags.Diagnostics {
 	}
 
 	b.configProvider = newOciAuthConfigProvider(obj)
+
 	err := b.configureRemoteClient()
 	if err != nil {
 		diags = append(diags, backendbase.ErrorAsDiagnostics(err)[0])

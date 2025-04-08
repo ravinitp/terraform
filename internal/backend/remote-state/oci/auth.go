@@ -33,10 +33,10 @@ type ociAuthConfigProvider struct {
 	privateKeyPassword string
 }
 
-func newOciAuthConfigProvider(obj cty.Value) *ociAuthConfigProvider {
-	p := &ociAuthConfigProvider{}
+func newOciAuthConfigProvider(obj cty.Value) ociAuthConfigProvider {
+	p := ociAuthConfigProvider{}
 
-	if authVal, ok := getBackendAttr(obj, AuthAttrName); ok {
+	if authVal, ok := getBackendAttrWithDefault(obj, AuthAttrName, AuthAPIKeySetting); ok {
 		p.authType = authVal.AsString()
 	}
 
@@ -73,7 +73,7 @@ func newOciAuthConfigProvider(obj cty.Value) *ociAuthConfigProvider {
 
 	return p
 }
-func (p *ociAuthConfigProvider) AuthType() (common.AuthConfig, error) {
+func (p ociAuthConfigProvider) AuthType() (common.AuthConfig, error) {
 	return common.AuthConfig{
 			AuthType:         common.UnknownAuthenticationType,
 			IsFromConfigFile: false,
@@ -82,35 +82,35 @@ func (p *ociAuthConfigProvider) AuthType() (common.AuthConfig, error) {
 		fmt.Errorf("unsupported, keep the interface")
 }
 
-func (p *ociAuthConfigProvider) TenancyOCID() (string, error) {
-
+func (p ociAuthConfigProvider) TenancyOCID() (string, error) {
+	logger.Debug(fmt.Sprintf("tanancy: %s, bool: %v", p.tenancyOcid, (p.tenancyOcid != "")))
 	if p.tenancyOcid != "" {
 		return p.tenancyOcid, nil
 	}
 	return "", fmt.Errorf("can not get %s from Terraform backend configuration", TenancyOcidAttrName)
 }
 
-func (p *ociAuthConfigProvider) UserOCID() (string, error) {
+func (p ociAuthConfigProvider) UserOCID() (string, error) {
 	if p.userOcid != "" {
 		return p.userOcid, nil
 	}
-	return "", fmt.Errorf("can not get %s from Terraform configuration", UserOcidAttrName)
+	return "", fmt.Errorf("can not get %s from Terraform backend configuration", UserOcidAttrName)
 }
 
-func (p *ociAuthConfigProvider) KeyFingerprint() (string, error) {
+func (p ociAuthConfigProvider) KeyFingerprint() (string, error) {
 	if p.fingerprint != "" {
 		return p.fingerprint, nil
 	}
-	return "", fmt.Errorf("can not get %s from Terraform configuration", FingerprintAttrName)
+	return "", fmt.Errorf("can not get %s from Terraform backend configuration", FingerprintAttrName)
 }
 
-func (p *ociAuthConfigProvider) Region() (string, error) {
+func (p ociAuthConfigProvider) Region() (string, error) {
 	if p.region != "" {
 		return p.region, nil
 	}
-	return "", fmt.Errorf("can not get %s from Terraform configuration", RegionAttrName)
+	return "", fmt.Errorf("can not get %s from Terraform backend configuration", RegionAttrName)
 }
-func (p *ociAuthConfigProvider) KeyID() (string, error) {
+func (p ociAuthConfigProvider) KeyID() (string, error) {
 	tenancy, err := p.TenancyOCID()
 	if err != nil {
 		return "", err
@@ -128,7 +128,7 @@ func (p *ociAuthConfigProvider) KeyID() (string, error) {
 	return fmt.Sprintf("%s/%s/%s", tenancy, user, fingerprint), nil
 }
 
-func (p *ociAuthConfigProvider) PrivateRSAKey() (key *rsa.PrivateKey, err error) {
+func (p ociAuthConfigProvider) PrivateRSAKey() (key *rsa.PrivateKey, err error) {
 
 	if p.privateKey != "" {
 		keyData := strings.ReplaceAll(p.privateKey, "\\n", "\n") // Ensure \n is replaced by actual newlines
@@ -147,9 +147,9 @@ func (p *ociAuthConfigProvider) PrivateRSAKey() (key *rsa.PrivateKey, err error)
 	return nil, fmt.Errorf("can not get private_key or private_key_path from Terraform configuration")
 }
 
-func (p *ociAuthConfigProvider) getConfigProviders() ([]common.ConfigurationProvider, error) {
+func (p ociAuthConfigProvider) getConfigProviders() ([]common.ConfigurationProvider, error) {
 	var configProviders []common.ConfigurationProvider
-
+	logger.Debug(fmt.Sprintf("Using %s authentication", p.authType))
 	switch strings.ToLower(p.authType) {
 	case strings.ToLower(AuthAPIKeySetting):
 		// No additional config providers needed
@@ -275,18 +275,18 @@ func (p *ociAuthConfigProvider) getConfigProviders() ([]common.ConfigurationProv
 
 	return configProviders, nil
 }
-func (p *ociAuthConfigProvider) getSdkConfigProvider() (common.ConfigurationProvider, error) {
+func (p ociAuthConfigProvider) getSdkConfigProvider() (common.ConfigurationProvider, error) {
 
 	configProviders, err := p.getConfigProviders()
 	if err != nil {
 		return nil, err
 	}
 
+	configProviders = append(configProviders, p)
 	//In GoSDK, the first step is to check if AuthType exists,
 	//for composite provider, we only check the first provider in the list for the AuthType.
 	//Then SDK will based on the AuthType to Create the actual provider if it's a valid value.
 	//If not, then SDK will base on the order in the composite provider list to check for necessary info (tenancyid, userID, fingerprint, region, keyID).
-	configProviders = append(configProviders, p)
 	if p.configFileProfile == "" {
 		configProviders = append(configProviders, common.DefaultConfigProvider())
 	} else {
