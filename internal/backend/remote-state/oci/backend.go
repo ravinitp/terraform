@@ -152,10 +152,8 @@ func (b *Backend) Configure(obj cty.Value) tfdiags.Diagnostics {
 		b.key = keyVal.AsString()
 	}
 
-	if workspaceKeyPrefixVal, ok := getBackendAttr(obj, WorkspaceKeyPrefixAttrName); ok {
+	if workspaceKeyPrefixVal, ok := getBackendAttrWithDefault(obj, WorkspaceKeyPrefixAttrName, defaultEnvPrefix); ok {
 		b.workspaceKeyPrefix = workspaceKeyPrefixVal.AsString()
-	} else {
-		b.workspaceKeyPrefix = defaultEnvPrefix
 	}
 
 	if kmsKeyIdVal, ok := getBackendAttr(obj, KmsKeyIdAttrName); ok {
