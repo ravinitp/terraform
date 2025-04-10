@@ -73,10 +73,8 @@ func (b *Backend) Workspaces() ([]string, error) {
 
 		for _, object := range listObjectResponse.Objects {
 			key := *object.Name
-			if strings.HasPrefix(key, b.workspaceKeyPrefix) {
+			if strings.HasPrefix(key, b.workspaceKeyPrefix) && strings.HasSuffix(key, b.key) {
 				name := strings.TrimPrefix(key, b.workspaceKeyPrefix+"/")
-				name = strings.TrimSuffix(name, ".md5")
-				name = strings.TrimSuffix(name, ".lock")
 				name = strings.TrimSuffix(name, b.key)
 				name = strings.TrimSuffix(name, "/")
 
