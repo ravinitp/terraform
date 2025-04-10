@@ -16,7 +16,7 @@ import (
 	"github.com/oracle/oci-go-sdk/v65/common"
 )
 
-const DefaultFilePartSize int64 = 5 * 1024 * 1024 // 5MB
+const DefaultFilePartSize int64 = 128 * 1024 * 1024 // 128MB
 const defaultNumberOfGoroutines = 10
 const MaxCount int64 = 10000
 
@@ -64,14 +64,6 @@ func (multipartUploadData MultipartUploadData) multiPartUploadImpl() error {
 	}
 	if multipartUploadData.client.kmsKeyID != "" {
 		multipartUploadRequest.OpcSseKmsKeyId = common.String(multipartUploadData.client.kmsKeyID)
-	} else if multipartUploadData.client.customerEncryptionKey != nil {
-		if len(multipartUploadData.client.customerEncryptionKey) > 0 && len(multipartUploadData.client.customerEncryptionKeySHA256) > 0 {
-			multipartUploadRequest.OpcSseCustomerKey = common.String(base64.StdEncoding.EncodeToString(multipartUploadData.client.customerEncryptionKey))
-			multipartUploadRequest.OpcSseCustomerKeySha256 = common.String(base64.StdEncoding.EncodeToString(multipartUploadData.client.customerEncryptionKeySHA256))
-		}
-		if len(multipartUploadData.client.encryptionAlgorithm) > 0 {
-			multipartUploadRequest.OpcSseCustomerAlgorithm = common.String(multipartUploadData.client.encryptionAlgorithm)
-		}
 	}
 
 	if multipartUploadData.client.etag != "" {
@@ -226,14 +218,6 @@ func (ctx *objectStorageMultiPartUploadContext) uploadPartsWorker() {
 
 		if ctx.client.kmsKeyID != "" {
 			uploadPartRequest.OpcSseKmsKeyId = common.String(ctx.client.kmsKeyID)
-		} else if ctx.client.customerEncryptionKey != nil {
-			if len(ctx.client.customerEncryptionKey) > 0 && len(ctx.client.customerEncryptionKeySHA256) > 0 {
-				uploadPartRequest.OpcSseCustomerKey = common.String(base64.StdEncoding.EncodeToString(ctx.client.customerEncryptionKey))
-				uploadPartRequest.OpcSseCustomerKeySha256 = common.String(base64.StdEncoding.EncodeToString(ctx.client.customerEncryptionKeySHA256))
-			}
-			if len(ctx.client.encryptionAlgorithm) > 0 {
-				uploadPartRequest.OpcSseCustomerAlgorithm = common.String(ctx.client.encryptionAlgorithm)
-			}
 		}
 
 		response, err := ctx.client.objectStorageClient.UploadPart(context.Background(), *uploadPartRequest)

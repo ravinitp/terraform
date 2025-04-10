@@ -37,13 +37,10 @@ func (b *Backend) configureRemoteClient() error {
 		return err
 	}
 	b.client = &RemoteClient{
-		objectStorageClient:         &client,
-		bucketName:                  b.bucket,
-		namespace:                   b.namespace,
-		kmsKeyID:                    b.kmsKeyID,
-		customerEncryptionKey:       b.customerEncryptionKey,
-		customerEncryptionKeySHA256: b.customerEncryptionKeySHA256,
-		encryptionAlgorithm:         b.encryptionAlgorithm,
+		objectStorageClient: &client,
+		bucketName:          b.bucket,
+		namespace:           b.namespace,
+		kmsKeyID:            b.kmsKeyID,
 	}
 	return nil
 }

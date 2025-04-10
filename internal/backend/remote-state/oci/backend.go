@@ -97,36 +97,18 @@ func (b *Backend) ConfigSchema() *configschema.Block {
 				Optional:    true,
 				Description: "The OCID of a master encryption key used to call the Key Management service to generate a data encryption key or to encrypt or decrypt a data encryption key.",
 			},
-			CustomerEncryptionKeyAttrName: {
-				Type:        cty.String,
-				Optional:    true,
-				Description: "base64-encoded 256-bit encryption key to use to encrypt or decrypt the data",
-			},
-			CustomerEncryptionKeySHA256AttrName: {
-				Type:        cty.String,
-				Optional:    true,
-				Description: "base64-encoded SHA256 hash of the encryption key. This value is used to check the integrity of the encryption key.",
-			},
-			EncryptionAlgorithm: {
-				Type:        cty.String,
-				Optional:    true,
-				Description: "encryption algorithm",
-			},
 		},
 	}
 }
 
 type Backend struct {
-	configProvider              ociAuthConfigProvider
-	bucket                      string
-	key                         string
-	namespace                   string
-	workspaceKeyPrefix          string
-	customerEncryptionKey       []byte
-	customerEncryptionKeySHA256 []byte
-	encryptionAlgorithm         string
-	kmsKeyID                    string
-	client                      *RemoteClient
+	configProvider     ociAuthConfigProvider
+	bucket             string
+	key                string
+	namespace          string
+	workspaceKeyPrefix string
+	kmsKeyID           string
+	client             *RemoteClient
 }
 
 func (b *Backend) PrepareConfig(obj cty.Value) (cty.Value, tfdiags.Diagnostics) {
@@ -159,19 +141,7 @@ func (b *Backend) Configure(obj cty.Value) tfdiags.Diagnostics {
 	if kmsKeyIdVal, ok := getBackendAttr(obj, KmsKeyIdAttrName); ok {
 		b.kmsKeyID = kmsKeyIdVal.AsString()
 	}
-
-	if customerKeyVal, ok := getBackendAttr(obj, CustomerEncryptionKeyAttrName); ok {
-		b.customerEncryptionKey = []byte(customerKeyVal.AsString())
-	}
-
-	if customerKeyShaVal, ok := getBackendAttr(obj, CustomerEncryptionKeySHA256AttrName); ok {
-		b.customerEncryptionKeySHA256 = []byte(customerKeyShaVal.AsString())
-	}
-
-	if encryptionAlgorithmVal, ok := getBackendAttr(obj, EncryptionAlgorithm); ok {
-		b.encryptionAlgorithm = encryptionAlgorithmVal.AsString()
-	}
-
+	
 	b.configProvider = newOciAuthConfigProvider(obj)
 
 	err := b.configureRemoteClient()

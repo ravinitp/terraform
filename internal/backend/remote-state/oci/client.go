@@ -20,16 +20,13 @@ import (
 )
 
 type RemoteClient struct {
-	objectStorageClient         *objectstorage.ObjectStorageClient
-	namespace                   string
-	bucketName                  string
-	path                        string
-	lockFilePath                string
-	customerEncryptionKey       []byte
-	customerEncryptionKeySHA256 []byte
-	encryptionAlgorithm         string
-	kmsKeyID                    string
-	etag                        string
+	objectStorageClient *objectstorage.ObjectStorageClient
+	namespace           string
+	bucketName          string
+	path                string
+	lockFilePath        string
+	kmsKeyID            string
+	etag                string
 }
 
 func (c *RemoteClient) Get() (*remote.Payload, error) {
@@ -59,16 +56,7 @@ func (c *RemoteClient) getObject(ctx context.Context) (*remote.Payload, error) {
 			RetryPolicy: getDefaultRetryPolicy(),
 		},
 	}
-	// Handle encryption settings
-	if c.customerEncryptionKey != nil {
-		if len(c.customerEncryptionKey) > 0 && len(c.customerEncryptionKeySHA256) > 0 {
-			headRequest.OpcSseCustomerKey = common.String(base64.StdEncoding.EncodeToString(c.customerEncryptionKey))
-			headRequest.OpcSseCustomerKeySha256 = common.String(base64.StdEncoding.EncodeToString(c.customerEncryptionKeySHA256))
-		}
-		if len(c.encryptionAlgorithm) > 0 {
-			headRequest.OpcSseCustomerAlgorithm = common.String(c.encryptionAlgorithm)
-		}
-	}
+
 	// Get object from OCI
 	headResponse, headErr := c.objectStorageClient.HeadObject(ctx, headRequest)
 	if headErr != nil {
@@ -91,17 +79,6 @@ func (c *RemoteClient) getObject(ctx context.Context) (*remote.Payload, error) {
 		RequestMetadata: common.RequestMetadata{
 			RetryPolicy: getDefaultRetryPolicy(),
 		},
-	}
-
-	// Handle encryption settings
-	if c.customerEncryptionKey != nil {
-		if len(c.customerEncryptionKey) > 0 && len(c.customerEncryptionKeySHA256) > 0 {
-			getRequest.OpcSseCustomerKey = common.String(base64.StdEncoding.EncodeToString(c.customerEncryptionKey))
-			getRequest.OpcSseCustomerKeySha256 = common.String(base64.StdEncoding.EncodeToString(c.customerEncryptionKeySHA256))
-		}
-		if len(c.encryptionAlgorithm) > 0 {
-			getRequest.OpcSseCustomerAlgorithm = common.String(c.encryptionAlgorithm)
-		}
 	}
 
 	// Get object from OCI
@@ -212,20 +189,13 @@ func (c *RemoteClient) uploadSinglePartObject(data, sum []byte) error {
 	if c.etag != "" {
 		putRequest.IfMatch = common.String(c.etag)
 	}
+	logger.Debug(fmt.Sprintf("kms: %s, c.kmsKeyID != %v", c.kmsKeyID, (c.kmsKeyID != "")))
 	// Handle encryption settings
 	if c.kmsKeyID != "" {
 		putRequest.OpcSseKmsKeyId = common.String(c.kmsKeyID)
-	} else if c.customerEncryptionKey != nil {
-		if len(c.customerEncryptionKey) > 0 && len(c.customerEncryptionKeySHA256) > 0 {
-			putRequest.OpcSseCustomerKey = common.String(base64.StdEncoding.EncodeToString(c.customerEncryptionKey))
-			putRequest.OpcSseCustomerKeySha256 = common.String(base64.StdEncoding.EncodeToString(c.customerEncryptionKeySHA256))
-		}
-		if len(c.encryptionAlgorithm) > 0 {
-			putRequest.OpcSseCustomerAlgorithm = common.String(c.encryptionAlgorithm)
-		}
 	}
 
-	logger.Info("Uploading remote state")
+	logger.Info(fmt.Sprintf("Uploading remote state: %s", putRequest.OpcSseKmsKeyId))
 
 	putResponse, err := c.objectStorageClient.PutObject(ctx, putRequest)
 	if err != nil {
