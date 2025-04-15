@@ -38,9 +38,10 @@ func (c *RemoteClient) Get() (*remote.Payload, error) {
 	logger.Info("Downloading remote state")
 
 	payload, err := c.getObject(ctx)
-	if err != nil {
+	if err != nil || payload == nil {
 		return nil, err
 	}
+
 	sum := md5.Sum(payload.Data)
 	md5Hash := base64.StdEncoding.EncodeToString(sum[:])
 	if !bytes.Equal([]byte(md5Hash), payload.MD5) {
