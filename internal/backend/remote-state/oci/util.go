@@ -143,7 +143,7 @@ func validateStringBucketName(val string, path cty.Path, diags *tfdiags.Diagnost
 func requiredAttributeErrDiag(path cty.Path) tfdiags.Diagnostic {
 	return tfdiags.AttributeValue(tfdiags.Error,
 		"Missing Required Value",
-		fmt.Sprintf("The attribute %q is required by the backend.\n\n", path.Copy())+
+		fmt.Sprintf("The attribute %q is required by the backend.\n\n", path)+
 			"Refer to the backend documentation for additional information which attributes are required.",
 		path,
 	)
