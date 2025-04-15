@@ -4,12 +4,14 @@
 package oci
 
 import (
+	"fmt"
 	"github.com/hashicorp/terraform/internal/backend"
 	"github.com/hashicorp/terraform/internal/backend/backendbase"
 	"github.com/hashicorp/terraform/internal/configs/configschema"
 	"github.com/hashicorp/terraform/internal/tfdiags"
 	"github.com/zclconf/go-cty/cty"
 	"path"
+	"strings"
 )
 
 var (
@@ -132,26 +134,66 @@ type Backend struct {
 
 func (b *Backend) PrepareConfig(obj cty.Value) (cty.Value, tfdiags.Diagnostics) {
 	var diags tfdiags.Diagnostics
+	if obj.IsNull() {
+		diags.Append(tfdiags.AttributeValue(tfdiags.Error, "Invalid Configuration", "Received null configuration for OCI backend.", cty.GetAttrPath(".")))
+		return obj, diags
+	}
+	if bucketVal := obj.GetAttr(BucketAttrName); !bucketVal.IsNull() {
+		validateStringBucketName(bucketVal.AsString(), cty.GetAttrPath(BucketAttrName), &diags)
+	} else {
+		diags.Append(requiredAttributeErrDiag(cty.GetAttrPath(BucketAttrName)))
+	}
+	if namespaceVal := obj.GetAttr(NamespaceAttrName); namespaceVal.IsNull() {
+		diags.Append(requiredAttributeErrDiag(cty.GetAttrPath(NamespaceAttrName)))
+	}
 	if keyVal, ok := getBackendAttrWithDefault(obj, KeyAttrName, defaultKeyValue); ok {
 		validateStringObjectPath(keyVal.AsString(), cty.GetAttrPath(KeyAttrName), &diags)
+	}
+	if workspaceKeyPrefixVal, ok := getBackendAttrWithDefault(obj, WorkspaceKeyPrefixAttrName, defaultEnvPrefix); ok {
+		validateStringWorkspacePrefix(workspaceKeyPrefixVal.AsString(), cty.GetAttrPath(WorkspaceKeyPrefixAttrName), &diags)
+	}
+	authVal, ok := getBackendAttr(obj, AuthAttrName)
+	if !ok || authVal.AsString() == "" {
+		// Default authentication provided by SDK
+		return obj, diags
+	}
+	switch strings.ToLower(authVal.AsString()) {
+	case strings.ToLower(AuthAPIKeySetting):
+		//Nothing to do
+		return obj, diags
+	case strings.ToLower(AuthInstancePrincipalSetting), strings.ToLower(AuthInstancePrincipalWithCertsSetting), strings.ToLower(ResourcePrincipal), strings.ToLower(AuthSecurityToken):
+		region, _ := getBackendAttr(obj, RegionAttrName)
+		if region.AsString() == "" {
+			diags.Append(tfdiags.Error,
+				"Missing region attribute required",
+				fmt.Sprintf("The attribute %q is required by the backend for %s authentication.\n\n", RegionAttrName, authVal.AsString()), cty.GetAttrPath(RegionAttrName),
+			)
+		}
+		if authVal.AsString() == strings.ToLower(AuthSecurityToken) {
+			profileVal, _ := getBackendAttr(obj, ConfigFileProfileAttrName)
+			if profileVal.AsString() == "" {
+				diags.Append(tfdiags.Error,
+					"Missing config_file_profile attribute required",
+					fmt.Sprintf("The attribute %q is required by the backend for %s authentication.\n\n", ConfigFileProfileAttrName, authVal.AsString()), cty.GetAttrPath(ConfigFileProfileAttrName),
+				)
+			}
+		}
+	default:
+		diags.Append(tfdiags.Error,
+			"Invalid authentication method",
+			fmt.Sprintf("auth must be one of '%s' or '%s' or '%s' or '%s' or '%s' or '%s'", AuthAPIKeySetting, AuthInstancePrincipalSetting, AuthInstancePrincipalWithCertsSetting, AuthSecurityToken, ResourcePrincipal, AuthOKEWorkloadIdentity), cty.GetAttrPath(AuthAttrName),
+		)
 	}
 	return obj, diags
 }
 func (b *Backend) Configure(obj cty.Value) tfdiags.Diagnostics {
 	var diags tfdiags.Diagnostics
 
-	if obj.IsNull() {
-		diags.Append(tfdiags.AttributeValue(tfdiags.Error, "Invalid Configuration", "Received null configuration for OCI backend.", cty.GetAttrPath(".")))
-		return diags
-	}
-
 	if bucketVal, ok := getBackendAttr(obj, BucketAttrName); ok {
 		b.bucket = bucketVal.AsString()
 	}
 	if namespaceVal, ok := getBackendAttr(obj, NamespaceAttrName); ok {
 		b.namespace = namespaceVal.AsString()
-	} else {
-		diags.Append(tfdiags.AttributeValue(tfdiags.Error, "Missing Required Attribute", "Bucket name cannot be null", cty.GetAttrPath("namespace")))
 	}
 	if keyVal, ok := getBackendAttrWithDefault(obj, KeyAttrName, defaultKeyValue); ok {
 		b.key = keyVal.AsString()
