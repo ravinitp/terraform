@@ -71,9 +71,6 @@ func (multipartUploadData MultipartUploadData) multiPartUploadImpl() error {
 		multipartUploadRequest.OpcSseCustomerAlgorithm = common.String(multipartUploadData.client.SSECustomerAlgorithm)
 	}
 
-	if multipartUploadData.client.etag != "" {
-		multipartUploadRequest.IfMatch = common.String(multipartUploadData.client.etag)
-	}
 	multipartUploadResponse, err := multipartUploadData.client.objectStorageClient.CreateMultipartUpload(context.Background(), *multipartUploadRequest)
 	if err != nil {
 		return fmt.Errorf("error creating multipart upload: %s", err)

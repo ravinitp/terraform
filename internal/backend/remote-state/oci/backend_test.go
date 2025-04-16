@@ -29,8 +29,8 @@ func TestBackendBasic(t *testing.T) {
 		"namespace": namespace,
 	})).(*Backend)
 
-	_ = createOCIBucket(ctx, t, b.client.objectStorageClient, bucketName, namespace, compartmentId)
-	//defer deleteOCIBucket(ctx, t, b.client.objectStorageClient, bucketName, *response.ETag, namespace)
+	response := createOCIBucket(ctx, t, b.client.objectStorageClient, bucketName, namespace, compartmentId)
+	defer deleteOCIBucket(ctx, t, b.client.objectStorageClient, bucketName, *response.ETag, namespace)
 
 	backend.TestBackendStates(t, b)
 }
